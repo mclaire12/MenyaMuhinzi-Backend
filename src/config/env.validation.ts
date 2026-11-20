@@ -1,0 +1,267 @@
+import { plainToInstance, Transform, type TransformFnParams } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  Min,
+  MinLength,
+  validateSync,
+} from 'class-validator';
+import { DURATION_PATTERN } from '../common/utils/duration';
+
+const DURATION_MESSAGE = '$property must be a duration such as 30s, 15m, 12h or 7d';
+
+export enum NodeEnvironment {
+  Development = 'development',
+  Production = 'production',
+  Test = 'test',
+}
+
+export enum LogLevel {
+  Fatal = 'fatal',
+  Error = 'error',
+  Warn = 'warn',
+  Info = 'info',
+  Debug = 'debug',
+  Trace = 'trace',
+  Silent = 'silent',
+}
+
+// Reads the raw value: implicit conversion would otherwise coerce the string "false" to `true`.
+const toBoolean = ({ obj, key, value }: TransformFnParams): unknown => {
+  const raw: unknown = obj[key] ?? value;
+  if (typeof raw !== 'string') return raw;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return raw;
+};
+
+export class EnvironmentVariables {
+  @IsEnum(NodeEnvironment)
+  NODE_ENV: NodeEnvironment = NodeEnvironment.Development;
+
+  @IsString()
+  @IsNotEmpty()
+  APP_NAME: string = 'MenyaMuhinzi API';
+
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  APP_PORT: number = 4000;
+
+  @IsString()
+  @IsNotEmpty()
+  API_PREFIX: string = 'api';
+
+  @IsString()
+  @IsNotEmpty()
+  API_VERSION: string = '1';
+
+  @IsString()
+  CORS_ORIGINS: string = '*';
+
+  @IsEnum(LogLevel)
+  LOG_LEVEL: LogLevel = LogLevel.Info;
+
+  @Transform(toBoolean)
+  @IsBoolean()
+  LOG_PRETTY: boolean = false;
+
+  @Transform(toBoolean)
+  @IsBoolean()
+  SWAGGER_ENABLED: boolean = true;
+
+  @IsString()
+  @IsNotEmpty()
+  SWAGGER_PATH: string = 'api/docs';
+
+  @IsString()
+  @IsNotEmpty()
+  DATABASE_URL: string;
+
+  @IsString()
+  @IsNotEmpty()
+  REDIS_HOST: string = 'localhost';
+
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  REDIS_PORT: number = 6379;
+
+  @IsOptional()
+  @IsString()
+  REDIS_PASSWORD?: string;
+
+  @IsInt()
+  @Min(0)
+  REDIS_DB: number = 0;
+
+  @IsString()
+  @IsNotEmpty()
+  QUEUE_PREFIX: string = 'menyamuhinzi';
+
+  @IsString()
+  @MinLength(32)
+  JWT_ACCESS_SECRET: string;
+
+  @Matches(DURATION_PATTERN, { message: DURATION_MESSAGE })
+  JWT_ACCESS_EXPIRES_IN: string = '15m';
+
+  /** HMAC key used to hash refresh and password-reset tokens before storage. */
+  @IsString()
+  @MinLength(32)
+  JWT_REFRESH_SECRET: string;
+
+  @Matches(DURATION_PATTERN, { message: DURATION_MESSAGE })
+  JWT_REFRESH_EXPIRES_IN: string = '7d';
+
+  @IsString()
+  @IsNotEmpty()
+  JWT_ISSUER: string = 'menyamuhinzi-api';
+
+  @IsString()
+  @IsNotEmpty()
+  JWT_AUDIENCE: string = 'menyamuhinzi-clients';
+
+  @IsInt()
+  @Min(1)
+  AUTH_MAX_FAILED_LOGINS: number = 5;
+
+  @IsInt()
+  @Min(1)
+  AUTH_LOCKOUT_MINUTES: number = 15;
+
+  @IsInt()
+  @Min(5)
+  AUTH_PASSWORD_RESET_TTL_MINUTES: number = 30;
+
+  @Transform(toBoolean)
+  @IsBoolean()
+  AUTH_FARMER_REQUIRES_APPROVAL: boolean = true;
+
+  /** Development aid: return the reset token in the API response. Never honoured in production. */
+  @Transform(toBoolean)
+  @IsBoolean()
+  AUTH_EXPOSE_RESET_TOKEN: boolean = false;
+
+  @IsInt()
+  @Min(1)
+  RATE_LIMIT_TTL_SECONDS: number = 60;
+
+  @IsInt()
+  @Min(1)
+  RATE_LIMIT_MAX: number = 120;
+
+  @IsInt()
+  @Min(1)
+  AUTH_RATE_LIMIT_MAX: number = 10;
+
+  /** Directory for uploaded knowledge files. File bytes are never stored in PostgreSQL. */
+  @IsString()
+  @IsNotEmpty()
+  KNOWLEDGE_STORAGE_DIR: string = './storage/knowledge';
+
+  @IsInt()
+  @Min(1024)
+  @Max(200 * 1024 * 1024)
+  KNOWLEDGE_MAX_FILE_BYTES: number = 20 * 1024 * 1024;
+
+  @IsInt()
+  @Min(200)
+  @Max(8000)
+  KNOWLEDGE_CHUNK_SIZE: number = 1200;
+
+  /** Must not exceed half of KNOWLEDGE_CHUNK_SIZE; checked when the pipeline starts. */
+  @IsInt()
+  @Min(0)
+  @Max(4000)
+  KNOWLEDGE_CHUNK_OVERLAP: number = 150;
+
+  @IsInt()
+  @Min(1)
+  @Max(5000)
+  KNOWLEDGE_MAX_PAGES: number = 500;
+
+  @IsInt()
+  @Min(1000)
+  KNOWLEDGE_EXTRACTION_TIMEOUT_MS: number = 60_000;
+
+  @IsInt()
+  @Min(32)
+  @Max(4096)
+  KNOWLEDGE_EXTRACTION_MEMORY_MB: number = 256;
+
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  KNOWLEDGE_JOB_ATTEMPTS: number = 3;
+
+  @Transform(toBoolean)
+  @IsBoolean()
+  KNOWLEDGE_WORKER_ENABLED: boolean = true;
+
+  @IsInt()
+  @Min(1)
+  @Max(16)
+  KNOWLEDGE_WORKER_CONCURRENCY: number = 2;
+
+  @Transform(toBoolean)
+  @IsBoolean()
+  AI_WORKER_ENABLED: boolean = true;
+
+  @IsInt()
+  @Min(1)
+  @Max(16)
+  AI_WORKER_CONCURRENCY: number = 2;
+
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  AI_REQUEST_ATTEMPTS: number = 3;
+
+  /** Upper bound on retrieved knowledge text placed into an assembled prompt. */
+  @IsInt()
+  @Min(500)
+  @Max(200_000)
+  AI_CONTEXT_MAX_CHARS: number = 8000;
+
+  @Transform(toBoolean)
+  @IsBoolean()
+  NOTIFICATIONS_WORKER_ENABLED: boolean = true;
+
+  @IsInt()
+  @Min(1)
+  @Max(32)
+  NOTIFICATIONS_WORKER_CONCURRENCY: number = 4;
+
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  NOTIFICATIONS_DELIVERY_ATTEMPTS: number = 3;
+}
+
+/**
+ * Validates `process.env` at startup so the application fails fast on misconfiguration.
+ */
+export function validateEnvironment(config: Record<string, unknown>): EnvironmentVariables {
+  const validated = plainToInstance(EnvironmentVariables, config, {
+    enableImplicitConversion: true,
+    exposeDefaultValues: true,
+  });
+
+  const errors = validateSync(validated, { skipMissingProperties: false });
+  if (errors.length > 0) {
+    const details = errors
+      .map((error) => `${error.property}: ${Object.values(error.constraints ?? {}).join(', ')}`)
+      .join('; ');
+    throw new Error(`Invalid environment configuration: ${details}`);
+  }
+
+  return validated;
+}

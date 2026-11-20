@@ -1,0 +1,18 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": "integration/.*\\.int-spec\\.ts$",
+  "transform": {
+    "[\\\\/]src[\\\\/]generated[\\\\/]prisma[\\\\/].+\\.ts$": "<rootDir>/transformers/esm-to-cjs.cjs",
+    "^.+\\.ts$": ["ts-jest", { "tsconfig": "<rootDir>/../tsconfig.jest.json" }],
+    "^.+\\.js$": "<rootDir>/transformers/esm-to-cjs.cjs"
+  },
+  "transformIgnorePatterns": ["/node_modules/(?!@nestjs/|@prisma/client/runtime/client\\.js$)"],
+  "moduleNameMapper": {
+    "^(\\.{1,2}/.*)\\.js$": "$1"
+  },
+  "globalSetup": "<rootDir>/integration/global-setup.ts",
+  "setupFiles": ["<rootDir>/integration/setup-env.ts", "<rootDir>/setup-env.ts"],
+  "testTimeout": 30000
+}

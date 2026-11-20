@@ -1,0 +1,224 @@
+/**
+ * Role and permission catalogue. The seed script writes this to the database;
+ * guards always read the assignments back from the database, so permissions
+ * edited by administrators take effect immediately.
+ */
+
+export const RoleCode = {
+  Admin: 'ADMIN',
+  Facilitator: 'FACILITATOR',
+  SmartphoneFarmer: 'SMARTPHONE_FARMER',
+  BasicPhoneFarmer: 'BASIC_PHONE_FARMER',
+} as const;
+
+export type RoleCode = (typeof RoleCode)[keyof typeof RoleCode];
+
+export const ALL_ROLE_CODES: RoleCode[] = Object.values(RoleCode);
+
+export const FARMER_ROLES: readonly RoleCode[] = [
+  RoleCode.SmartphoneFarmer,
+  RoleCode.BasicPhoneFarmer,
+];
+
+export const Permission = {
+  UsersRead: 'users:read',
+  UsersCreate: 'users:create',
+  UsersUpdate: 'users:update',
+  UsersManageStatus: 'users:manage-status',
+  UsersAssignRoles: 'users:assign-roles',
+  RolesRead: 'roles:read',
+  RolesManage: 'roles:manage',
+  AccountRequestsCreate: 'account-requests:create',
+  AccountRequestsRead: 'account-requests:read',
+  AccountRequestsDecide: 'account-requests:decide',
+  FarmersRead: 'farmers:read',
+  FarmersCreate: 'farmers:create',
+  FarmersUpdate: 'farmers:update',
+  FacilitatorsRead: 'facilitators:read',
+  FacilitatorsCreate: 'facilitators:create',
+  FacilitatorsUpdate: 'facilitators:update',
+  TargetingGroupsRead: 'targeting-groups:read',
+  TargetingGroupsManage: 'targeting-groups:manage',
+  FarmerGroupsRead: 'farmer-groups:read',
+  FarmerGroupsManage: 'farmer-groups:manage',
+  CropsRead: 'crops:read',
+  CropsManage: 'crops:manage',
+  CoursesRead: 'courses:read',
+  CoursesManage: 'courses:manage',
+  CoursesPublish: 'courses:publish',
+  GroupCoursesAssign: 'group-courses:assign',
+  EnrollmentsRead: 'enrollments:read',
+  EnrollmentsManage: 'enrollments:manage',
+  ProgressRead: 'progress:read',
+  ProgressUpdate: 'progress:update',
+  AssessmentsRead: 'assessments:read',
+  AssessmentsManage: 'assessments:manage',
+  AssessmentsAttempt: 'assessments:attempt',
+  AssessmentsReview: 'assessments:review',
+  KnowledgeRead: 'knowledge:read',
+  KnowledgeManage: 'knowledge:manage',
+  KnowledgeApprove: 'knowledge:approve',
+  AiAssistantsRead: 'ai-assistants:read',
+  AiAssistantsManage: 'ai-assistants:manage',
+  AiModelsRead: 'ai-models:read',
+  AiModelsManage: 'ai-models:manage',
+  AiPromptsRead: 'ai-prompts:read',
+  AiPromptsManage: 'ai-prompts:manage',
+  AiConversationsRead: 'ai-conversations:read',
+  AiConversationsManage: 'ai-conversations:manage',
+  AiRequestsRead: 'ai-requests:read',
+  AiUsageRead: 'ai-usage:read',
+  AiSafetyRead: 'ai-safety:read',
+  AiSafetyManage: 'ai-safety:manage',
+  NotificationsRead: 'notifications:read',
+  NotificationsManage: 'notifications:manage',
+  NotificationTemplatesRead: 'notification-templates:read',
+  NotificationTemplatesManage: 'notification-templates:manage',
+  NotificationSettingsRead: 'notification-settings:read',
+  NotificationSettingsManage: 'notification-settings:manage',
+  NotificationDeliveriesRead: 'notification-deliveries:read',
+} as const;
+
+export type Permission = (typeof Permission)[keyof typeof Permission];
+
+export const ALL_PERMISSIONS: Permission[] = Object.values(Permission);
+
+export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
+  'users:read': 'List and view user accounts',
+  'users:create': 'Register user accounts directly',
+  'users:update': 'Edit user account details',
+  'users:manage-status': 'Activate, deactivate, suspend and reactivate accounts',
+  'users:assign-roles': 'Assign and change user roles',
+  'roles:read': 'View roles and their permissions',
+  'roles:manage': 'Change the permissions granted to roles',
+  'account-requests:create': 'Submit account requests on behalf of farmers',
+  'account-requests:read': 'List and view account requests',
+  'account-requests:decide': 'Approve or reject account requests',
+  'farmers:read': 'List and view farmer profiles',
+  'farmers:create': 'Register farmers directly',
+  'farmers:update': 'Edit farmer profiles',
+  'facilitators:read': 'List and view facilitator profiles',
+  'facilitators:create': 'Register facilitators directly',
+  'facilitators:update': 'Edit facilitator profiles',
+  'targeting-groups:read': 'List and view administrator course-targeting groups',
+  'targeting-groups:manage': 'Create, update and deactivate course-targeting groups',
+  'farmer-groups:read': 'List and view facilitator farmer groups and their members',
+  'farmer-groups:manage': 'Create and update facilitator groups and their membership',
+  'crops:read': 'List and view crops',
+  'crops:manage': 'Create, update and deactivate crops',
+  'courses:read': 'List and view courses',
+  'courses:manage': 'Create and update courses, modules and lessons',
+  'courses:publish': 'Publish, unpublish and archive courses',
+  'group-courses:assign': 'Assign published courses to facilitator farmer groups',
+  'enrollments:read': 'View course enrollments',
+  'enrollments:manage': 'Change enrollment status for any farmer',
+  'progress:read': 'View learning progress',
+  'progress:update': 'Record lesson progress and learning sessions',
+  'assessments:read': 'View assessments and attempts',
+  'assessments:manage': 'Create and update assessments and questions',
+  'assessments:attempt': 'Start and submit assessment attempts',
+  'assessments:review': 'Score short-answer questions',
+  'knowledge:read': 'View approved knowledge sources, chunks, topics and glossary terms',
+  'knowledge:manage': 'Register, update and process knowledge sources, topics and glossary terms',
+  'knowledge:approve': 'Approve, reject and archive knowledge sources',
+  'ai-assistants:read': 'List and view AI assistants available to the caller',
+  'ai-assistants:manage': 'Create, configure, activate, deactivate and archive AI assistants',
+  'ai-models:read': 'View the AI model registry and assistant model configurations',
+  'ai-models:manage': 'Register AI models and manage assistant model configurations',
+  'ai-prompts:read': 'View AI prompt templates and their versions',
+  'ai-prompts:manage': 'Create and version AI prompt templates',
+  'ai-conversations:read': "View any user's AI conversations (administrative oversight)",
+  'ai-conversations:manage': 'Start, continue, rename and archive own AI conversations',
+  'ai-requests:read': 'View any AI request and its processing status (administrative oversight)',
+  'ai-usage:read': 'View AI usage and cost records',
+  'ai-safety:read': 'View AI safety policies and their versions',
+  'ai-safety:manage': 'Create, version, activate and deactivate AI safety policies',
+  'notifications:read': 'View own notifications, unread counts and delivery status',
+  'notifications:manage':
+    'Mark own notifications read, unread or archived and change own notification preferences',
+  'notification-templates:read': 'View notification templates, their versions and history',
+  'notification-templates:manage':
+    'Create, version, activate, deactivate and archive notification templates',
+  'notification-settings:read': 'View notification category policy and channel availability',
+  'notification-settings:manage':
+    'Configure notification categories and enable or disable channels',
+  'notification-deliveries:read':
+    'View notification deliveries across all users (administrative oversight)',
+};
+
+export interface RoleDefinition {
+  code: RoleCode;
+  name: string;
+  description: string;
+  permissions: Permission[];
+}
+
+export const ROLE_DEFINITIONS: RoleDefinition[] = [
+  {
+    code: RoleCode.Admin,
+    name: 'Administrator',
+    description: 'Manages users, roles, approvals, groups and courses',
+    permissions: ALL_PERMISSIONS,
+  },
+  {
+    code: RoleCode.Facilitator,
+    name: 'Agricultural Facilitator / Agronomist',
+    description: 'Supports farmer groups and registers farmers for approval',
+    permissions: [
+      Permission.FarmersRead,
+      Permission.FarmersUpdate,
+      Permission.AccountRequestsCreate,
+      Permission.FarmerGroupsRead,
+      Permission.FarmerGroupsManage,
+      Permission.CropsRead,
+      Permission.CoursesRead,
+      Permission.GroupCoursesAssign,
+      Permission.EnrollmentsRead,
+      Permission.ProgressRead,
+      Permission.AssessmentsRead,
+      Permission.AssessmentsReview,
+      Permission.KnowledgeRead,
+      Permission.AiAssistantsRead,
+      Permission.AiConversationsManage,
+      Permission.NotificationsRead,
+      Permission.NotificationsManage,
+    ],
+  },
+  {
+    code: RoleCode.SmartphoneFarmer,
+    name: 'Smartphone Farmer',
+    description: 'Farmer using the mobile or web application',
+    permissions: [
+      Permission.CoursesRead,
+      Permission.EnrollmentsRead,
+      Permission.ProgressRead,
+      Permission.ProgressUpdate,
+      Permission.AssessmentsRead,
+      Permission.AssessmentsAttempt,
+      Permission.AiAssistantsRead,
+      Permission.AiConversationsManage,
+      Permission.NotificationsRead,
+      Permission.NotificationsManage,
+    ],
+  },
+  {
+    code: RoleCode.BasicPhoneFarmer,
+    name: 'Basic-phone Farmer',
+    description: 'Farmer using USSD and voice (IVR) channels',
+    permissions: [
+      Permission.CoursesRead,
+      Permission.EnrollmentsRead,
+      Permission.ProgressRead,
+      Permission.ProgressUpdate,
+      Permission.AssessmentsRead,
+      Permission.AssessmentsAttempt,
+      Permission.AiAssistantsRead,
+      Permission.AiConversationsManage,
+      Permission.NotificationsRead,
+      Permission.NotificationsManage,
+    ],
+  },
+];
+
+/** The ADMIN role's permissions are fixed so administrators cannot lock themselves out. */
+export const IMMUTABLE_ROLE_CODES: readonly RoleCode[] = [RoleCode.Admin];

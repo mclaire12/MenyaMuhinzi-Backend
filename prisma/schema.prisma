@@ -1,0 +1,2114 @@
+// MenyaMuhinzi database schema.
+// The connection URL lives in prisma.config.ts.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  REJECTED
+}
+
+enum Language {
+  rw
+  en
+}
+
+enum FarmerType {
+  SMARTPHONE
+  BASIC_PHONE
+}
+
+enum FarmerCategory {
+  SMALLHOLDER
+  MEDIUM_SCALE
+  COMMERCIAL
+  COOPERATIVE_MEMBER
+  LEAD_FARMER
+}
+
+enum Province {
+  KIGALI_CITY
+  NORTHERN
+  SOUTHERN
+  EASTERN
+  WESTERN
+}
+
+enum AccountRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
+enum LoginAttemptOutcome {
+  SUCCESS
+  UNKNOWN_IDENTIFIER
+  INVALID_PASSWORD
+  NO_PASSWORD
+  ACCOUNT_LOCKED
+  ACCOUNT_NOT_ACTIVE
+}
+
+enum TokenRevocationReason {
+  LOGOUT
+  ROTATED
+  REUSE_DETECTED
+  PASSWORD_CHANGED
+  ACCOUNT_DISABLED
+}
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum TargetAudience {
+  ALL_FARMERS
+  SMARTPHONE_FARMERS
+  BASIC_PHONE_FARMERS
+}
+
+enum CourseCategory {
+  CROP_PRODUCTION
+  PEST_AND_DISEASE_MANAGEMENT
+  SOIL_AND_FERTILITY
+  WATER_MANAGEMENT
+  POST_HARVEST
+  MARKETING
+  CLIMATE_SMART_AGRICULTURE
+  GENERAL
+}
+
+enum DifficultyLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum CourseStatus {
+  DRAFT
+  UNDER_REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum LessonType {
+  TEXT
+  AUDIO
+  VIDEO
+  IMAGE
+  DOCUMENT
+  MIXED
+}
+
+enum ResourceType {
+  TEXT
+  VIDEO
+  AUDIO
+  DOCUMENT
+  IMAGE
+}
+
+enum PublicationScope {
+  PLATFORM
+  TARGETED
+}
+
+// ---------------------------------------------------------------------------
+// Identity and access control
+// ---------------------------------------------------------------------------
+
+model User {
+  id                  String     @id @default(uuid()) @db.Uuid
+  fullName            String     @db.VarChar(150)
+  /// E.164 format, e.g. +250788123456. Primary identifier for every user.
+  phoneNumber         String     @unique @db.VarChar(20)
+  /// Stored lower-case. Optional: basic-phone farmers usually have no email.
+  email               String?    @unique @db.VarChar(254)
+  /// scrypt hash. Null for accounts that have not set a password yet.
+  passwordHash        String?    @db.VarChar(255)
+  status              UserStatus @default(PENDING)
+  statusReason        String?    @db.VarChar(500)
+  statusChangedAt     DateTime?
+  statusChangedById   String?    @db.Uuid
+  preferredLanguage   Language   @default(rw)
+  failedLoginAttempts Int        @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  passwordChangedAt   DateTime?
+  createdById         String?    @db.Uuid
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  deletedAt           DateTime?
+
+  createdBy       User?  @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers    User[] @relation("UserCreatedBy")
+  statusChangedBy User?  @relation("UserStatusChangedBy", fields: [statusChangedById], references: [id], onDelete: SetNull)
+  statusChanges   User[] @relation("UserStatusChangedBy")
+
+  roles               UserRole[]           @relation("UserRoles")
+  assignedRoles       UserRole[]           @relation("UserRoleAssignedBy")
+  refreshTokens       RefreshToken[]
+  loginAttempts       LoginAttempt[]
+  passwordResetTokens PasswordResetToken[]
+  accountRequests     AccountRequest[]     @relation("AccountRequestApplicant")
+  submittedRequests   AccountRequest[]     @relation("AccountRequestSubmittedBy")
+  approvalDecisions   AccountApproval[]
+  farmerProfile       FarmerProfile?
+  facilitatorProfile  FacilitatorProfile?
+  location            UserLocation?
+
+  adminTargetingGroupsCreated         AdminTargetingGroup[]            @relation("AdminTargetingGroupCreatedBy")
+  facilitatorGroupsLed                FacilitatorGroup[]               @relation("FacilitatorGroupFacilitator")
+  facilitatorGroupsCreated            FacilitatorGroup[]               @relation("FacilitatorGroupCreatedBy")
+  facilitatorGroupMemberships         FacilitatorGroupMember[]         @relation("GroupMemberUser")
+  facilitatorGroupMembersAdded        FacilitatorGroupMember[]         @relation("GroupMemberAddedBy")
+  coursesCreated                      Course[]                         @relation("CourseCreatedBy")
+  coursePublications                  CoursePublication[]              @relation("CoursePublishedBy")
+  coursePublicationsClosed            CoursePublication[]              @relation("CourseUnpublishedBy")
+  groupCoursesAssigned                FacilitatorGroupCourse[]         @relation("GroupCourseAssignedBy")
+  enrollments                         CourseEnrollment[]
+  enrollmentEvents                    EnrollmentEvent[]                @relation("EnrollmentEventActor")
+  lessonProgress                      LessonProgress[]
+  learningSessions                    LearningSession[]
+  assessmentAttempts                  AssessmentAttempt[]
+  assessmentsCreated                  Assessment[]                     @relation("AssessmentCreatedBy")
+  lessonResourcesCreated              LessonResource[]                 @relation("LessonResourceCreatedBy")
+  knowledgeSourcesCreated             KnowledgeSource[]                @relation("KnowledgeSourceCreatedBy")
+  knowledgeSourcesApproved            KnowledgeSource[]                @relation("KnowledgeSourceApprovedBy")
+  knowledgeVersionsCreated            KnowledgeSourceVersion[]         @relation("KnowledgeVersionCreatedBy")
+  knowledgeVersionsReviewed           KnowledgeSourceVersion[]         @relation("KnowledgeVersionReviewedBy")
+  knowledgeApprovals                  KnowledgeApproval[]
+  knowledgeJobsRequested              KnowledgeProcessingJob[]
+  glossaryTermsCreated                AgriculturalGlossaryTerm[]       @relation("GlossaryCreatedBy")
+  glossaryTermsUpdated                AgriculturalGlossaryTerm[]       @relation("GlossaryUpdatedBy")
+  embeddingConfigurations             EmbeddingConfiguration[]
+  auditLogs                           AuditLog[]
+  aiAssistantsCreated                 AiAssistant[]
+  aiAssistantVersions                 AiAssistantVersion[]
+  aiModelsCreated                     AiModel[]
+  aiModelVersions                     AiModelVersion[]
+  aiModelConfigurations               AiAssistantModelConfiguration[]
+  aiPromptTemplates                   AiPromptTemplate[]
+  aiPromptVersions                    AiPromptVersion[]
+  aiSafetyPolicies                    AiSafetyPolicy[]
+  aiSafetyPolicyVersions              AiSafetyPolicyVersion[]
+  aiConversations                     AiConversation[]
+  aiRequests                          AiRequest[]
+  notifications                       Notification[]                   @relation("UserNotifications")
+  notificationPreference              NotificationPreference?          @relation("UserNotificationPreference")
+  notificationChannelPreferences      NotificationChannelPreference[]  @relation("UserNotificationChannelPreferences")
+  notificationCategoryPreferences     NotificationCategoryPreference[] @relation("UserNotificationCategoryPreferences")
+  notificationTemplatesCreated        NotificationTemplate[]           @relation("NotificationTemplateCreatedBy")
+  notificationTemplateVersionsCreated NotificationTemplateVersion[]    @relation("NotificationTemplateVersionCreatedBy")
+  notificationCategorySettingsUpdated NotificationCategorySetting[]    @relation("NotificationCategorySettingUpdatedBy")
+  notificationChannelSettingsUpdated  NotificationChannelSetting[]     @relation("NotificationChannelSettingUpdatedBy")
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// Stable machine name, e.g. ADMIN, FACILITATOR.
+  code        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  /// System roles are seeded and cannot be removed.
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users           UserRole[]
+  permissions     RolePermission[]
+  accountRequests AccountRequest[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// e.g. users:read, account-requests:decide
+  code        String   @unique @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId       String   @db.Uuid
+  roleId       String   @db.Uuid
+  assignedById String?  @db.Uuid
+  assignedAt   DateTime @default(now())
+
+  user       User  @relation("UserRoles", fields: [userId], references: [id], onDelete: Cascade)
+  role       Role  @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  assignedBy User? @relation("UserRoleAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String   @db.Uuid
+  permissionId String   @db.Uuid
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+// ---------------------------------------------------------------------------
+// Sessions and credentials
+// ---------------------------------------------------------------------------
+
+model RefreshToken {
+  id            String                 @id @default(uuid()) @db.Uuid
+  userId        String                 @db.Uuid
+  /// HMAC-SHA256 of the opaque token; the token itself is never stored.
+  tokenHash     String                 @unique @db.VarChar(128)
+  /// All tokens produced by rotating one login share a family.
+  familyId      String                 @db.Uuid
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason TokenRevocationReason?
+  replacedById  String?                @db.Uuid
+  userAgent     String?                @db.VarChar(500)
+  ipAddress     String?                @db.VarChar(64)
+  createdAt     DateTime               @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model LoginAttempt {
+  id         String              @id @default(uuid()) @db.Uuid
+  userId     String?             @db.Uuid
+  /// Identifier as normalised from the request (phone number or email).
+  identifier String              @db.VarChar(254)
+  outcome    LoginAttemptOutcome
+  ipAddress  String?             @db.VarChar(64)
+  userAgent  String?             @db.VarChar(500)
+  createdAt  DateTime            @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([identifier, createdAt])
+  @@map("login_attempts")
+}
+
+model PasswordResetToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  tokenHash   String    @unique @db.VarChar(128)
+  expiresAt   DateTime
+  usedAt      DateTime?
+  requestedIp String?   @db.VarChar(64)
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Account approval workflow
+// ---------------------------------------------------------------------------
+
+/// At most one PENDING request per user (partial unique index in the migration).
+model AccountRequest {
+  id              String               @id @default(uuid()) @db.Uuid
+  userId          String               @db.Uuid
+  requestedRoleId String               @db.Uuid
+  status          AccountRequestStatus @default(PENDING)
+  /// Set when a facilitator or admin submitted the request on the applicant's behalf.
+  submittedById   String?              @db.Uuid
+  notes           String?              @db.VarChar(1000)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  user          User             @relation("AccountRequestApplicant", fields: [userId], references: [id], onDelete: Cascade)
+  requestedRole Role             @relation(fields: [requestedRoleId], references: [id], onDelete: Restrict)
+  submittedBy   User?            @relation("AccountRequestSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  approval      AccountApproval?
+
+  @@index([status, createdAt])
+  @@index([userId])
+  @@map("account_requests")
+}
+
+model AccountApproval {
+  id               String           @id @default(uuid()) @db.Uuid
+  accountRequestId String           @unique @db.Uuid
+  decision         ApprovalDecision
+  /// Administrator who decided. Restrict keeps the audit trail intact.
+  decidedById      String           @db.Uuid
+  reason           String?          @db.VarChar(1000)
+  decidedAt        DateTime         @default(now())
+
+  accountRequest AccountRequest @relation(fields: [accountRequestId], references: [id], onDelete: Cascade)
+  decidedBy      User           @relation(fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([decidedById])
+  @@map("account_approvals")
+}
+
+// ---------------------------------------------------------------------------
+// Profiles
+// ---------------------------------------------------------------------------
+
+model FarmerProfile {
+  id             String         @id @default(uuid()) @db.Uuid
+  userId         String         @unique @db.Uuid
+  farmerType     FarmerType
+  farmerCategory FarmerCategory @default(SMALLHOLDER)
+  registeredAt   DateTime       @default(now())
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([farmerType])
+  @@index([farmerCategory])
+  @@map("farmer_profiles")
+}
+
+model FacilitatorProfile {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @unique @db.Uuid
+  professionalTitle String   @db.VarChar(150)
+  organization      String   @db.VarChar(200)
+  contactEmail      String?  @db.VarChar(254)
+  contactPhone      String?  @db.VarChar(20)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("facilitator_profiles")
+}
+
+/// Rwandan administrative location: province > district > sector > cell > village.
+model UserLocation {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid
+  province  Province
+  district  String   @db.VarChar(50)
+  sector    String?  @db.VarChar(80)
+  cell      String?  @db.VarChar(80)
+  village   String?  @db.VarChar(80)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([province, district])
+  @@map("user_locations")
+}
+
+// ---------------------------------------------------------------------------
+// Crops, groups and courses
+// ---------------------------------------------------------------------------
+
+model Crop {
+  id          String       @id @default(uuid()) @db.Uuid
+  /// Stable machine name, e.g. TOMATO. Immutable after creation.
+  code        String       @unique @db.VarChar(40)
+  nameEn      String       @unique @db.VarChar(100)
+  nameRw      String       @unique @db.VarChar(100)
+  description String?      @db.VarChar(2000)
+  status      RecordStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  targetingGroups   AdminTargetingGroup[]
+  facilitatorGroups FacilitatorGroup[]
+  courses           Course[]
+  knowledgeSources  KnowledgeSourceCrop[]
+  glossaryTerms     AgriculturalGlossaryTerm[]
+  aiAssistants      AiAssistantCrop[]
+
+  @@map("crops")
+}
+
+/// Audience category used to target courses. Holds no farmer memberships.
+model AdminTargetingGroup {
+  id                   String         @id @default(uuid()) @db.Uuid
+  name                 String         @db.VarChar(150)
+  description          String?        @db.VarChar(2000)
+  cropId               String         @db.Uuid
+  targetAudience       TargetAudience
+  province             Province
+  district             String         @db.VarChar(50)
+  sector               String?        @db.VarChar(80)
+  estimatedFarmerCount Int            @default(0)
+  status               RecordStatus   @default(ACTIVE)
+  createdById          String         @db.Uuid
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  crop         Crop                      @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  createdBy    User                      @relation("AdminTargetingGroupCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  publications CoursePublicationTarget[]
+
+  @@index([status, createdAt])
+  @@index([cropId])
+  @@index([province, district])
+  @@map("admin_targeting_groups")
+}
+
+/// A facilitator's real training group. Members live in FacilitatorGroupMember.
+model FacilitatorGroup {
+  id            String       @id @default(uuid()) @db.Uuid
+  name          String       @db.VarChar(150)
+  description   String?      @db.VarChar(2000)
+  facilitatorId String       @db.Uuid
+  cropId        String       @db.Uuid
+  province      Province
+  district      String       @db.VarChar(50)
+  sector        String       @db.VarChar(80)
+  cell          String?      @db.VarChar(80)
+  village       String?      @db.VarChar(80)
+  status        RecordStatus @default(ACTIVE)
+  createdById   String       @db.Uuid
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  facilitator User                     @relation("FacilitatorGroupFacilitator", fields: [facilitatorId], references: [id], onDelete: Restrict)
+  createdBy   User                     @relation("FacilitatorGroupCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  crop        Crop                     @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  members     FacilitatorGroupMember[]
+  courses     FacilitatorGroupCourse[]
+
+  @@index([facilitatorId, status])
+  @@index([cropId])
+  @@index([province, district])
+  @@map("facilitator_groups")
+}
+
+model FacilitatorGroupMember {
+  groupId   String   @db.Uuid
+  userId    String   @db.Uuid
+  addedById String   @db.Uuid
+  addedAt   DateTime @default(now())
+
+  group   FacilitatorGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user    User             @relation("GroupMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  addedBy User             @relation("GroupMemberAddedBy", fields: [addedById], references: [id], onDelete: Restrict)
+
+  @@id([groupId, userId])
+  @@index([userId])
+  @@map("facilitator_group_members")
+}
+
+model Course {
+  id                       String          @id @default(uuid()) @db.Uuid
+  title                    String          @db.VarChar(200)
+  shortDescription         String          @db.VarChar(500)
+  detailedDescription      String          @db.Text
+  cropId                   String          @db.Uuid
+  category                 CourseCategory
+  targetAudience           TargetAudience
+  difficulty               DifficultyLevel
+  learningObjectives       String[]
+  estimatedDurationMinutes Int
+  language                 Language        @default(rw)
+  /// Storage key or URL of the cover image. File upload arrives with the media module.
+  coverImageRef            String?         @db.VarChar(500)
+  status                   CourseStatus    @default(DRAFT)
+  publishedAt              DateTime?
+  createdById              String          @db.Uuid
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+
+  crop         Crop                     @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  createdBy    User                     @relation("CourseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  modules      CourseModule[]
+  publications CoursePublication[]
+  groupCourses FacilitatorGroupCourse[]
+  enrollments  CourseEnrollment[]
+  assessments  Assessment[]
+
+  @@index([status, createdAt])
+  @@index([cropId])
+  @@index([language])
+  @@index([createdById])
+  @@map("courses")
+}
+
+model CourseModule {
+  id                 String        @id @default(uuid()) @db.Uuid
+  courseId           String        @db.Uuid
+  title              String        @db.VarChar(200)
+  description        String?       @db.VarChar(2000)
+  learningObjectives String[]      @default([])
+  displayOrder       Int
+  status             ContentStatus @default(DRAFT)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons     Lesson[]
+  assessments Assessment[]
+
+  @@index([courseId, displayOrder])
+  @@map("course_modules")
+}
+
+model Lesson {
+  id                       String        @id @default(uuid()) @db.Uuid
+  moduleId                 String        @db.Uuid
+  title                    String        @db.VarChar(200)
+  description              String?       @db.VarChar(2000)
+  lessonType               LessonType
+  /// Optional written body. Media stays in contentRef or lesson resources, not in the database as bytes.
+  mainContent              String?       @db.Text
+  /// Legacy single reference. New material should also be added as lesson resources.
+  contentRef               String?       @db.VarChar(500)
+  learningObjectives       String[]      @default([])
+  language                 Language      @default(rw)
+  estimatedDurationMinutes Int           @default(0)
+  displayOrder             Int
+  status                   ContentStatus @default(DRAFT)
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  module      CourseModule      @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  resources   LessonResource[]
+  progress    LessonProgress[]
+  sessions    LearningSession[]
+  assessments Assessment[]
+
+  @@index([moduleId, displayOrder])
+  @@map("lessons")
+}
+
+/// One row per publication. Unpublishing closes the row; it is never deleted.
+model CoursePublication {
+  id              String           @id @default(uuid()) @db.Uuid
+  courseId        String           @db.Uuid
+  scope           PublicationScope
+  publishedById   String           @db.Uuid
+  publishedAt     DateTime         @default(now())
+  unpublishedAt   DateTime?
+  unpublishedById String?          @db.Uuid
+  isCurrent       Boolean          @default(true)
+
+  course        Course                    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  publishedBy   User                      @relation("CoursePublishedBy", fields: [publishedById], references: [id], onDelete: Restrict)
+  unpublishedBy User?                     @relation("CourseUnpublishedBy", fields: [unpublishedById], references: [id], onDelete: Restrict)
+  targets       CoursePublicationTarget[]
+
+  @@index([courseId, isCurrent])
+  @@index([publishedById])
+  @@map("course_publications")
+}
+
+model CoursePublicationTarget {
+  publicationId String @db.Uuid
+  groupId       String @db.Uuid
+
+  publication CoursePublication   @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  group       AdminTargetingGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+
+  @@id([publicationId, groupId])
+  @@index([groupId])
+  @@map("course_publication_targets")
+}
+
+/// A published course assigned to one facilitator group. The pair is unique.
+model FacilitatorGroupCourse {
+  groupId      String   @db.Uuid
+  courseId     String   @db.Uuid
+  assignedById String   @db.Uuid
+  assignedAt   DateTime @default(now())
+
+  group      FacilitatorGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  course     Course           @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  assignedBy User             @relation("GroupCourseAssignedBy", fields: [assignedById], references: [id], onDelete: Restrict)
+
+  @@id([groupId, courseId])
+  @@index([courseId])
+  @@map("facilitator_group_courses")
+}
+
+// ---------------------------------------------------------------------------
+// Learning: enrollment, content resources, progress, assessments
+// ---------------------------------------------------------------------------
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  WITHDRAWN
+  SUSPENDED
+}
+
+enum LessonProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum LearningChannel {
+  WEB
+  USSD
+  IVR
+  MOBILE
+}
+
+enum LearningSessionStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+enum AssessmentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  SHORT_ANSWER
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  PENDING_REVIEW
+  PASSED
+  FAILED
+}
+
+/// One row per farmer and course. Status changes stay on the row so history is not deleted.
+model CourseEnrollment {
+  id           String           @id @default(uuid()) @db.Uuid
+  userId       String           @db.Uuid
+  courseId     String           @db.Uuid
+  status       EnrollmentStatus @default(ACTIVE)
+  enrolledAt   DateTime         @default(now())
+  completedAt  DateTime?
+  withdrawnAt  DateTime?
+  suspendedAt  DateTime?
+  statusReason String?          @db.VarChar(500)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  user   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course            @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  events EnrollmentEvent[]
+
+  @@unique([userId, courseId])
+  @@index([courseId, status])
+  @@index([userId, status])
+  @@map("course_enrollments")
+}
+
+/// Append-only record of enrollment status changes, including re-enrollment.
+model EnrollmentEvent {
+  id           String            @id @default(uuid()) @db.Uuid
+  enrollmentId String            @db.Uuid
+  fromStatus   EnrollmentStatus?
+  toStatus     EnrollmentStatus
+  actorId      String            @db.Uuid
+  reason       String?           @db.VarChar(500)
+  createdAt    DateTime          @default(now())
+
+  enrollment CourseEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  actor      User             @relation("EnrollmentEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([enrollmentId, createdAt])
+  @@map("enrollment_events")
+}
+
+/// A reference to text, media, or an external file. Bytes are not stored here.
+model LessonResource {
+  id            String       @id @default(uuid()) @db.Uuid
+  lessonId      String       @db.Uuid
+  resourceType  ResourceType
+  /// Storage key or external URL. The file itself lives outside PostgreSQL.
+  contentRef    String       @db.VarChar(500)
+  title         String       @db.VarChar(200)
+  description   String?      @db.VarChar(2000)
+  language      Language     @default(rw)
+  displayOrder  Int
+  fileSizeBytes Int?
+  mimeType      String?      @db.VarChar(100)
+  createdById   String       @db.Uuid
+  createdAt     DateTime     @default(now())
+
+  lesson    Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  createdBy User   @relation("LessonResourceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([lessonId, displayOrder])
+  @@map("lesson_resources")
+}
+
+/// One progress row per farmer and lesson, shared by every learning channel.
+model LessonProgress {
+  id                 String               @id @default(uuid()) @db.Uuid
+  userId             String               @db.Uuid
+  courseId           String               @db.Uuid
+  moduleId           String               @db.Uuid
+  lessonId           String               @db.Uuid
+  status             LessonProgressStatus @default(NOT_STARTED)
+  progressPercentage Int                  @default(0)
+  timeSpentSeconds   Int                  @default(0)
+  startedAt          DateTime?
+  lastAccessedAt     DateTime?
+  completedAt        DateTime?
+  lastChannel        LearningChannel?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@index([userId, courseId])
+  @@index([userId, moduleId])
+  @@map("lesson_progress")
+}
+
+model LearningSession {
+  id              String                @id @default(uuid()) @db.Uuid
+  userId          String                @db.Uuid
+  courseId        String                @db.Uuid
+  lessonId        String                @db.Uuid
+  channel         LearningChannel
+  status          LearningSessionStatus @default(ACTIVE)
+  startedAt       DateTime              @default(now())
+  endedAt         DateTime?
+  durationSeconds Int?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([userId, lessonId, status])
+  @@index([userId, courseId])
+  @@map("learning_sessions")
+}
+
+/// Belongs to exactly one of a course, a module, or a lesson.
+model Assessment {
+  id               String           @id @default(uuid()) @db.Uuid
+  title            String           @db.VarChar(200)
+  description      String?          @db.VarChar(2000)
+  courseId         String?          @db.Uuid
+  moduleId         String?          @db.Uuid
+  lessonId         String?          @db.Uuid
+  passingScore     Int
+  maxAttempts      Int              @default(3)
+  timeLimitMinutes Int?
+  language         Language         @default(rw)
+  status           AssessmentStatus @default(DRAFT)
+  createdById      String           @db.Uuid
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  course    Course?              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module    CourseModule?        @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  lesson    Lesson?              @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  createdBy User                 @relation("AssessmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  questions AssessmentQuestion[]
+  attempts  AssessmentAttempt[]
+
+  @@index([courseId])
+  @@index([moduleId])
+  @@index([lessonId])
+  @@index([status])
+  @@map("assessments")
+}
+
+model AssessmentQuestion {
+  id            String       @id @default(uuid()) @db.Uuid
+  assessmentId  String       @db.Uuid
+  text          String       @db.VarChar(2000)
+  questionType  QuestionType
+  /// Multiple choice: [{ "id": "...", "text": "..." }]. Unused for other types.
+  options       Json?
+  /// Option id for multiple choice, boolean for true/false. Null for short answer.
+  correctAnswer Json?
+  marks         Int          @default(1)
+  explanation   String?      @db.VarChar(2000)
+  displayOrder  Int
+
+  assessment Assessment         @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  answers    AssessmentAnswer[]
+
+  @@index([assessmentId, displayOrder])
+  @@map("assessment_questions")
+}
+
+model AssessmentAttempt {
+  id            String        @id @default(uuid()) @db.Uuid
+  assessmentId  String        @db.Uuid
+  userId        String        @db.Uuid
+  attemptNumber Int
+  status        AttemptStatus @default(IN_PROGRESS)
+  score         Int?
+  maxScore      Int?
+  percentage    Int?
+  passed        Boolean?
+  timedOut      Boolean       @default(false)
+  startedAt     DateTime      @default(now())
+  submittedAt   DateTime?
+
+  assessment Assessment         @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers    AssessmentAnswer[]
+
+  @@unique([assessmentId, userId, attemptNumber])
+  @@index([userId, assessmentId])
+  @@map("assessment_attempts")
+}
+
+model AssessmentAnswer {
+  id           String   @id @default(uuid()) @db.Uuid
+  attemptId    String   @db.Uuid
+  questionId   String   @db.Uuid
+  /// Option id, boolean, or free text. Never a client-supplied score.
+  response     Json
+  awardedMarks Int?
+  createdAt    DateTime @default(now())
+
+  attempt  AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, questionId])
+  @@map("assessment_answers")
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge base, glossary, embeddings and audit
+// ---------------------------------------------------------------------------
+
+enum KnowledgeSourceType {
+  PDF
+  DOCX
+  TXT
+  HTML
+  WEB_ARTICLE
+  OTHER
+}
+
+enum KnowledgeSourceStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum KnowledgeStorageKind {
+  /// File uploaded through the API and written to knowledge storage.
+  UPLOAD
+  /// File that already exists in knowledge storage.
+  STORAGE_REFERENCE
+  /// Address of an external page. Not processed in this phase.
+  EXTERNAL_URL
+}
+
+enum KnowledgeReviewAction {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  ARCHIVED
+  SUPERSEDED
+}
+
+enum KnowledgeStage {
+  EXTRACTION
+  NORMALIZATION
+  METADATA
+  CHUNKING
+  EMBEDDING
+}
+
+enum KnowledgeJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum KnowledgeHistoryEvent {
+  QUEUED
+  STARTED
+  COMPLETED
+  FAILED
+  RETRYING
+  SKIPPED
+  WARNING
+}
+
+enum KnowledgeChunkStatus {
+  CHUNKED
+  EMBEDDING_PENDING
+  EMBEDDED
+  EMBEDDING_FAILED
+}
+
+enum EmbeddingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum VectorDistanceMetric {
+  COSINE
+  DOT_PRODUCT
+  EUCLIDEAN
+}
+
+model KnowledgeTopic {
+  id          String       @id @default(uuid()) @db.Uuid
+  /// Stable machine name, e.g. IRRIGATION.
+  code        String       @unique @db.VarChar(60)
+  nameEn      String       @unique @db.VarChar(150)
+  /// Entered by an administrator. Never generated.
+  nameRw      String?      @unique @db.VarChar(150)
+  description String?      @db.VarChar(2000)
+  /// Words that suggest this topic during processing.
+  keywords    String[]     @default([])
+  status      RecordStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  sources       KnowledgeSourceTopic[]
+  glossaryTerms AgriculturalGlossaryTerm[]
+
+  @@map("knowledge_topics")
+}
+
+/// Logical document. Each uploaded file is a version; approval applies to one version.
+model KnowledgeSource {
+  id                  String                @id @default(uuid()) @db.Uuid
+  title               String                @db.VarChar(300)
+  description         String?               @db.VarChar(5000)
+  sourceType          KnowledgeSourceType
+  language            Language              @default(rw)
+  sourceOrganization  String?               @db.VarChar(200)
+  author              String?               @db.VarChar(200)
+  publicationDate     DateTime?             @db.Date
+  /// Status of the latest version, or ARCHIVED once the source is archived.
+  status              KnowledgeSourceStatus @default(DRAFT)
+  isActive            Boolean               @default(true)
+  latestVersionNumber Int                   @default(0)
+  /// The version that retrieval may use. Older approved versions are kept as ARCHIVED.
+  approvedVersionId   String?               @unique @db.Uuid
+  approvedById        String?               @db.Uuid
+  approvedAt          DateTime?
+  archivedAt          DateTime?
+  createdById         String                @db.Uuid
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  createdBy       User                          @relation("KnowledgeSourceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy      User?                         @relation("KnowledgeSourceApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  approvedVersion KnowledgeSourceVersion?       @relation("KnowledgeSourceApprovedVersion", fields: [approvedVersionId], references: [id], onDelete: SetNull)
+  versions        KnowledgeSourceVersion[]      @relation("KnowledgeSourceVersions")
+  crops           KnowledgeSourceCrop[]
+  topics          KnowledgeSourceTopic[]
+  approvals       KnowledgeApproval[]
+  jobs            KnowledgeProcessingJob[]
+  history         KnowledgeProcessingHistory[]
+  documents       KnowledgeDocument[]
+  chunks          KnowledgeChunk[]
+  aiReferences    AiRequestKnowledgeReference[]
+
+  @@index([status])
+  @@index([sourceType])
+  @@index([language])
+  @@index([publicationDate])
+  @@index([createdAt])
+  @@map("knowledge_sources")
+}
+
+model KnowledgeSourceVersion {
+  id               String                @id @default(uuid()) @db.Uuid
+  sourceId         String                @db.Uuid
+  versionNumber    Int
+  storageKind      KnowledgeStorageKind
+  originalFilename String?               @db.VarChar(255)
+  /// Storage key or external URL. File bytes are not stored in PostgreSQL.
+  storageRef       String                @db.VarChar(1000)
+  fileSizeBytes    Int?
+  mimeType         String?               @db.VarChar(150)
+  /// SHA-256 of the file. The same file cannot be added twice to one source.
+  checksumSha256   String?               @db.VarChar(64)
+  status           KnowledgeSourceStatus @default(DRAFT)
+  processingError  String?               @db.VarChar(2000)
+  changeNote       String?               @db.VarChar(1000)
+  createdById      String                @db.Uuid
+  submittedAt      DateTime?
+  reviewedById     String?               @db.Uuid
+  reviewedAt       DateTime?
+  reviewReason     String?               @db.VarChar(2000)
+  processedAt      DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  source       KnowledgeSource               @relation("KnowledgeSourceVersions", fields: [sourceId], references: [id], onDelete: Cascade)
+  approvedOf   KnowledgeSource?              @relation("KnowledgeSourceApprovedVersion")
+  createdBy    User                          @relation("KnowledgeVersionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewedBy   User?                         @relation("KnowledgeVersionReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
+  document     KnowledgeDocument?
+  chunks       KnowledgeChunk[]
+  approvals    KnowledgeApproval[]
+  jobs         KnowledgeProcessingJob[]
+  history      KnowledgeProcessingHistory[]
+  aiReferences AiRequestKnowledgeReference[]
+
+  @@unique([sourceId, versionNumber])
+  @@unique([sourceId, checksumSha256])
+  @@index([status])
+  @@map("knowledge_source_versions")
+}
+
+/// Extracted and normalized text of one version. Text only; no binary content.
+model KnowledgeDocument {
+  id                  String    @id @default(uuid()) @db.Uuid
+  sourceId            String    @db.Uuid
+  versionId           String    @unique @db.Uuid
+  rawText             String    @db.Text
+  /// Extracted text per page: [{ pageNumber, text }].
+  pages               Json
+  normalizedText      String?   @db.Text
+  /// Headings and paragraphs: [{ kind, text, level, pageNumber }].
+  blocks              Json?
+  pageCount           Int?
+  characterCount      Int       @default(0)
+  wordCount           Int       @default(0)
+  detectedLanguage    Language?
+  languageConfidence  Float?
+  detectedCropCodes   String[]  @default([])
+  detectedTopicCodes  String[]  @default([])
+  extractedMetadata   Json?
+  chunkingOptions     Json?
+  extractedAt         DateTime  @default(now())
+  normalizedAt        DateTime?
+  metadataProcessedAt DateTime?
+  chunkedAt           DateTime?
+  updatedAt           DateTime  @updatedAt
+
+  source       KnowledgeSource               @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  version      KnowledgeSourceVersion        @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  chunks       KnowledgeChunk[]
+  aiReferences AiRequestKnowledgeReference[]
+
+  @@index([sourceId])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id           String               @id @default(uuid()) @db.Uuid
+  documentId   String               @db.Uuid
+  sourceId     String               @db.Uuid
+  versionId    String               @db.Uuid
+  chunkIndex   Int
+  text         String               @db.Text
+  contentHash  String               @db.VarChar(64)
+  sectionTitle String?              @db.VarChar(300)
+  pageNumber   Int?
+  language     Language
+  cropCodes    String[]             @default([])
+  topicCodes   String[]             @default([])
+  /// headingPath, pageEnd, overlapChars, charCount.
+  metadata     Json
+  status       KnowledgeChunkStatus @default(CHUNKED)
+  createdAt    DateTime             @default(now())
+
+  document     KnowledgeDocument             @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  source       KnowledgeSource               @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  version      KnowledgeSourceVersion        @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  embeddings   KnowledgeEmbedding[]
+  aiReferences AiRequestKnowledgeReference[]
+
+  @@unique([documentId, chunkIndex])
+  @@index([sourceId])
+  @@index([versionId])
+  @@index([language])
+  @@index([cropCodes], type: Gin, map: "knowledge_chunks_cropCodes_gin")
+  @@index([topicCodes], type: Gin, map: "knowledge_chunks_topicCodes_gin")
+  @@map("knowledge_chunks")
+}
+
+model KnowledgeSourceCrop {
+  sourceId String @db.Uuid
+  cropId   String @db.Uuid
+
+  source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  crop   Crop            @relation(fields: [cropId], references: [id], onDelete: Restrict)
+
+  @@id([sourceId, cropId])
+  @@index([cropId])
+  @@map("knowledge_source_crops")
+}
+
+model KnowledgeSourceTopic {
+  sourceId String @db.Uuid
+  topicId  String @db.Uuid
+
+  source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  topic  KnowledgeTopic  @relation(fields: [topicId], references: [id], onDelete: Restrict)
+
+  @@id([sourceId, topicId])
+  @@index([topicId])
+  @@map("knowledge_source_topics")
+}
+
+model AgriculturalGlossaryTerm {
+  id            String       @id @default(uuid()) @db.Uuid
+  termEn        String       @db.VarChar(200)
+  termRw        String       @db.VarChar(200)
+  descriptionEn String?      @db.VarChar(2000)
+  descriptionRw String?      @db.VarChar(2000)
+  cropId        String?      @db.Uuid
+  topicId       String?      @db.Uuid
+  synonymsEn    String[]     @default([])
+  synonymsRw    String[]     @default([])
+  usageExamples String[]     @default([])
+  status        RecordStatus @default(ACTIVE)
+  createdById   String       @db.Uuid
+  updatedById   String?      @db.Uuid
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  crop      Crop?           @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  topic     KnowledgeTopic? @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  createdBy User            @relation("GlossaryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy User?           @relation("GlossaryUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@unique([termEn, termRw])
+  @@index([cropId])
+  @@index([topicId])
+  @@index([status])
+  @@map("agricultural_glossary_terms")
+}
+
+/// Approval history. Rows are never updated or deleted.
+model KnowledgeApproval {
+  id        String                @id @default(uuid()) @db.Uuid
+  sourceId  String                @db.Uuid
+  versionId String?               @db.Uuid
+  action    KnowledgeReviewAction
+  actorId   String                @db.Uuid
+  reason    String?               @db.VarChar(2000)
+  createdAt DateTime              @default(now())
+
+  source  KnowledgeSource         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  version KnowledgeSourceVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  actor   User                    @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([sourceId, createdAt])
+  @@map("knowledge_approvals")
+}
+
+/// One row per pipeline stage run. A stage has at most one queued or running row per version.
+model KnowledgeProcessingJob {
+  id            String             @id @default(uuid()) @db.Uuid
+  sourceId      String             @db.Uuid
+  versionId     String             @db.Uuid
+  stage         KnowledgeStage
+  status        KnowledgeJobStatus @default(QUEUED)
+  runNumber     Int
+  attempts      Int                @default(0)
+  maxAttempts   Int
+  queueJobId    String?            @db.VarChar(200)
+  error         String?            @db.VarChar(2000)
+  requestedById String?            @db.Uuid
+  queuedAt      DateTime           @default(now())
+  startedAt     DateTime?
+  finishedAt    DateTime?
+
+  source      KnowledgeSource              @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  version     KnowledgeSourceVersion       @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  requestedBy User?                        @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+  history     KnowledgeProcessingHistory[]
+
+  @@index([versionId, stage])
+  @@index([status])
+  @@map("knowledge_processing_jobs")
+}
+
+model KnowledgeProcessingHistory {
+  id        String                @id @default(uuid()) @db.Uuid
+  sourceId  String                @db.Uuid
+  versionId String?               @db.Uuid
+  jobId     String?               @db.Uuid
+  stage     KnowledgeStage?
+  event     KnowledgeHistoryEvent
+  message   String                @db.VarChar(1000)
+  details   Json?
+  createdAt DateTime              @default(now())
+
+  source  KnowledgeSource         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  version KnowledgeSourceVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  job     KnowledgeProcessingJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([sourceId, createdAt])
+  @@index([versionId])
+  @@map("knowledge_processing_history")
+}
+
+/// Describes an embedding model. Vectors are produced only when a matching provider is registered.
+model EmbeddingConfiguration {
+  id             String               @id @default(uuid()) @db.Uuid
+  name           String               @db.VarChar(150)
+  provider       String               @db.VarChar(100)
+  model          String               @db.VarChar(200)
+  modelVersion   String?              @db.VarChar(100)
+  dimensions     Int
+  distanceMetric VectorDistanceMetric @default(COSINE)
+  /// Increases when the configuration changes in a way that needs new vectors.
+  version        Int                  @default(1)
+  status         RecordStatus         @default(INACTIVE)
+  settings       Json?
+  createdById    String               @db.Uuid
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  createdBy  User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  embeddings KnowledgeEmbedding[]
+
+  @@unique([provider, model, version])
+  @@map("embedding_configurations")
+}
+
+/// Vector metadata. The vector itself lives in a vector store behind the VectorStore interface.
+model KnowledgeEmbedding {
+  id              String          @id @default(uuid()) @db.Uuid
+  chunkId         String          @db.Uuid
+  configurationId String          @db.Uuid
+  status          EmbeddingStatus @default(PENDING)
+  /// Hash of the chunk text the vector was made from.
+  contentHash     String          @db.VarChar(64)
+  dimensions      Int?
+  vectorStore     String?         @db.VarChar(100)
+  vectorRef       String?         @db.VarChar(500)
+  attempts        Int             @default(0)
+  error           String?         @db.VarChar(2000)
+  embeddedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  chunk         KnowledgeChunk         @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+  configuration EmbeddingConfiguration @relation(fields: [configurationId], references: [id], onDelete: Restrict)
+
+  @@unique([chunkId, configurationId])
+  @@index([configurationId, status])
+  @@map("knowledge_embeddings")
+}
+
+/// Append-only record of administrative actions.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String   @db.VarChar(100)
+  entityType String   @db.VarChar(100)
+  entityId   String?  @db.VarChar(100)
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// AI assistants, model registry, prompts, conversations and request tracking.
+// No AI provider is connected; these records prepare for future integration.
+// ---------------------------------------------------------------------------
+
+/// Lifecycle of administrator-managed AI configuration records.
+enum AiRecordStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum AiCapability {
+  TEXT_GENERATION
+  EMBEDDINGS
+  CLASSIFICATION
+  TRANSLATION
+  SUMMARIZATION
+}
+
+enum AiPromptCategory {
+  SYSTEM
+  AGRICULTURAL_ASSISTANCE
+  CROP_GUIDANCE
+  LEARNING_SUPPORT
+  ASSESSMENT_SUPPORT
+  SAFETY
+  GENERAL
+}
+
+enum AiConversationStatus {
+  ACTIVE
+  ARCHIVED
+  CLOSED
+}
+
+enum AiMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum AiMessageStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AiRequestStatus {
+  CREATED
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AiSafetyCategory {
+  AGRICULTURAL_ADVICE
+  PEST_CONTROL
+  DISEASE_MANAGEMENT
+  CHEMICAL_USAGE
+  GENERAL_SAFETY
+  HUMAN_ESCALATION
+}
+
+enum AiUsageStatus {
+  /// Counts were reported by the provider.
+  RECORDED
+  /// The request ended without provider usage figures; counts stay null.
+  NOT_AVAILABLE
+}
+
+enum AiValidationStatus {
+  PASSED
+  WARNING
+  FAILED
+}
+
+model AiAssistant {
+  id                      String         @id @default(uuid()) @db.Uuid
+  /// Stable machine name, e.g. TOMATO_ADVISOR.
+  code                    String         @unique @db.VarChar(60)
+  name                    String         @db.VarChar(150)
+  /// Free identifier so new types need no migration, e.g. GENERAL_AGRICULTURE.
+  assistantType           String         @db.VarChar(60)
+  purpose                 String         @db.VarChar(1000)
+  description             String?        @db.VarChar(5000)
+  supportedLanguages      Language[]
+  defaultLanguage         Language
+  /// Role codes whose users may use the assistant.
+  allowedRoles            String[]
+  /// Whether future requests may retrieve approved knowledge.
+  knowledgeAccess         Boolean        @default(false)
+  maxKnowledgeChunks      Int            @default(5)
+  requireSourceReferences Boolean        @default(false)
+  status                  AiRecordStatus @default(DRAFT)
+  currentVersion          Int            @default(1)
+  archivedAt              DateTime?
+  createdById             String         @db.Uuid
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  createdBy           User                            @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  crops               AiAssistantCrop[]
+  versions            AiAssistantVersion[]
+  modelConfigurations AiAssistantModelConfiguration[]
+  prompts             AiAssistantPrompt[]
+  conversations       AiConversation[]
+  requests            AiRequest[]
+  usageRecords        AiUsageRecord[]
+
+  @@index([status])
+  @@index([assistantType])
+  @@map("ai_assistants")
+}
+
+model AiAssistantCrop {
+  assistantId String @db.Uuid
+  cropId      String @db.Uuid
+
+  assistant AiAssistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  crop      Crop        @relation(fields: [cropId], references: [id], onDelete: Restrict)
+
+  @@id([assistantId, cropId])
+  @@index([cropId])
+  @@map("ai_assistant_crops")
+}
+
+/// Snapshot of an assistant's configuration after each change. Never updated.
+model AiAssistantVersion {
+  id          String   @id @default(uuid()) @db.Uuid
+  assistantId String   @db.Uuid
+  version     Int
+  snapshot    Json
+  changeNote  String?  @db.VarChar(1000)
+  changedById String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  assistant AiAssistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  changedBy User        @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@unique([assistantId, version])
+  @@map("ai_assistant_versions")
+}
+
+/// Describes a model the platform may use later. Holds no credentials.
+model AiModel {
+  id                  String         @id @default(uuid()) @db.Uuid
+  /// Provider identifier matched against registered AIProvider ids, e.g. "openai".
+  provider            String         @db.VarChar(100)
+  modelName           String         @db.VarChar(200)
+  modelVersion        String         @db.VarChar(100)
+  displayName         String         @db.VarChar(200)
+  capabilities        AiCapability[]
+  supportedLanguages  Language[]
+  contextWindowTokens Int?
+  maxOutputTokens     Int?
+  /// Non-secret descriptive settings. Secret-looking keys are rejected by the API.
+  metadata            Json?
+  status              AiRecordStatus @default(DRAFT)
+  currentVersion      Int            @default(1)
+  archivedAt          DateTime?
+  createdById         String         @db.Uuid
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  createdBy              User                            @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  versions               AiModelVersion[]
+  primaryConfigurations  AiAssistantModelConfiguration[] @relation("AiConfigPrimaryModel")
+  fallbackConfigurations AiAssistantModelConfiguration[] @relation("AiConfigFallbackModel")
+  usageRecords           AiUsageRecord[]
+
+  @@unique([provider, modelName, modelVersion])
+  @@index([status])
+  @@map("ai_models")
+}
+
+model AiModelVersion {
+  id          String   @id @default(uuid()) @db.Uuid
+  modelId     String   @db.Uuid
+  version     Int
+  snapshot    Json
+  changeNote  String?  @db.VarChar(1000)
+  changedById String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  model     AiModel @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  changedBy User    @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@unique([modelId, version])
+  @@map("ai_model_versions")
+}
+
+/// Versioned link from an assistant to its primary and optional fallback model.
+/// At most one configuration per assistant is active (partial unique index).
+model AiAssistantModelConfiguration {
+  id                   String         @id @default(uuid()) @db.Uuid
+  assistantId          String         @db.Uuid
+  version              Int
+  primaryModelId       String         @db.Uuid
+  fallbackModelId      String?        @db.Uuid
+  requiredCapabilities AiCapability[]
+  /// Non-secret generation settings such as temperature.
+  parameters           Json?
+  status               RecordStatus   @default(INACTIVE)
+  effectiveFrom        DateTime?
+  deactivatedAt        DateTime?
+  changeNote           String?        @db.VarChar(1000)
+  createdById          String         @db.Uuid
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  assistant     AiAssistant     @relation(fields: [assistantId], references: [id], onDelete: Restrict)
+  primaryModel  AiModel         @relation("AiConfigPrimaryModel", fields: [primaryModelId], references: [id], onDelete: Restrict)
+  fallbackModel AiModel?        @relation("AiConfigFallbackModel", fields: [fallbackModelId], references: [id], onDelete: Restrict)
+  createdBy     User            @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  requests      AiRequest[]
+  usageRecords  AiUsageRecord[]
+
+  @@unique([assistantId, version])
+  @@index([primaryModelId])
+  @@index([fallbackModelId])
+  @@map("ai_assistant_model_configurations")
+}
+
+model AiPromptTemplate {
+  id                  String           @id @default(uuid()) @db.Uuid
+  code                String           @unique @db.VarChar(60)
+  name                String           @db.VarChar(150)
+  description         String?          @db.VarChar(2000)
+  category            AiPromptCategory
+  language            Language
+  purpose             String?          @db.VarChar(1000)
+  status              AiRecordStatus   @default(DRAFT)
+  /// Version used when an assistant does not pin one.
+  defaultVersionId    String?          @unique @db.Uuid
+  latestVersionNumber Int              @default(0)
+  archivedAt          DateTime?
+  createdById         String           @db.Uuid
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  createdBy      User                @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  defaultVersion AiPromptVersion?    @relation("AiPromptDefaultVersion", fields: [defaultVersionId], references: [id], onDelete: Restrict)
+  versions       AiPromptVersion[]   @relation("AiPromptVersions")
+  assistants     AiAssistantPrompt[]
+
+  @@index([category])
+  @@index([status])
+  @@map("ai_prompt_templates")
+}
+
+/// Immutable prompt text. Requests keep the id of the version they used.
+model AiPromptVersion {
+  id            String   @id @default(uuid()) @db.Uuid
+  templateId    String   @db.Uuid
+  versionNumber Int
+  content       String   @db.Text
+  /// Placeholders found in the content, e.g. ["language", "context"].
+  variables     String[]
+  changeNote    String?  @db.VarChar(1000)
+  createdById   String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  template      AiPromptTemplate    @relation("AiPromptVersions", fields: [templateId], references: [id], onDelete: Restrict)
+  defaultOf     AiPromptTemplate?   @relation("AiPromptDefaultVersion")
+  createdBy     User                @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  assistantPins AiAssistantPrompt[]
+  requests      AiRequest[]
+
+  @@unique([templateId, versionNumber])
+  @@map("ai_prompt_versions")
+}
+
+model AiAssistantPrompt {
+  assistantId     String   @db.Uuid
+  templateId      String   @db.Uuid
+  /// Null means the template's default version is used.
+  pinnedVersionId String?  @db.Uuid
+  position        Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  assistant     AiAssistant      @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  template      AiPromptTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  pinnedVersion AiPromptVersion? @relation(fields: [pinnedVersionId], references: [id], onDelete: Restrict)
+
+  @@id([assistantId, templateId])
+  @@index([templateId])
+  @@map("ai_assistant_prompts")
+}
+
+model AiConversation {
+  id             String               @id @default(uuid()) @db.Uuid
+  userId         String               @db.Uuid
+  assistantId    String               @db.Uuid
+  title          String               @db.VarChar(200)
+  language       Language
+  status         AiConversationStatus @default(ACTIVE)
+  /// Also the sequence number of the latest message.
+  messageCount   Int                  @default(0)
+  lastActivityAt DateTime             @default(now())
+  archivedAt     DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  user      User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  assistant AiAssistant @relation(fields: [assistantId], references: [id], onDelete: Restrict)
+  messages  AiMessage[]
+  requests  AiRequest[]
+
+  @@index([userId, status, lastActivityAt])
+  @@index([assistantId])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id              String          @id @default(uuid()) @db.Uuid
+  conversationId  String          @db.Uuid
+  /// Position in the conversation, starting at 1.
+  sequence        Int
+  role            AiMessageRole
+  content         String          @db.Text
+  language        Language
+  status          AiMessageStatus @default(COMPLETED)
+  /// Client-supplied id that makes message submission idempotent.
+  clientRequestId String?         @db.VarChar(100)
+  /// Structured data such as source references and safety information.
+  metadata        Json?
+  /// True when the content came from a test double, never from a real model.
+  isTestData      Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  conversation    AiConversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  requestAsUser   AiRequest?             @relation("AiRequestUserMessage")
+  requestAsAnswer AiRequest?             @relation("AiRequestAssistantMessage")
+  validations     AiResponseValidation[]
+
+  @@unique([conversationId, sequence])
+  @@unique([conversationId, clientRequestId])
+  @@map("ai_messages")
+}
+
+/// Lifecycle of one future AI execution.
+model AiRequest {
+  id                   String          @id @default(uuid()) @db.Uuid
+  userId               String          @db.Uuid
+  assistantId          String          @db.Uuid
+  conversationId       String          @db.Uuid
+  userMessageId        String          @unique @db.Uuid
+  assistantMessageId   String?         @unique @db.Uuid
+  modelConfigurationId String?         @db.Uuid
+  /// First prompt version used; all of them are in promptVersionIds.
+  promptVersionId      String?         @db.Uuid
+  promptVersionIds     String[]        @db.Uuid
+  policyVersionIds     String[]        @db.Uuid
+  status               AiRequestStatus @default(CREATED)
+  errorCode            String?         @db.VarChar(100)
+  /// Safe to show to the user; never contains provider internals or secrets.
+  errorMessage         String?         @db.VarChar(1000)
+  attempts             Int             @default(0)
+  queuedAt             DateTime?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  durationMs           Int?
+  metadata             Json?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  user               User                           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  assistant          AiAssistant                    @relation(fields: [assistantId], references: [id], onDelete: Restrict)
+  conversation       AiConversation                 @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userMessage        AiMessage                      @relation("AiRequestUserMessage", fields: [userMessageId], references: [id], onDelete: Cascade)
+  assistantMessage   AiMessage?                     @relation("AiRequestAssistantMessage", fields: [assistantMessageId], references: [id], onDelete: SetNull)
+  modelConfiguration AiAssistantModelConfiguration? @relation(fields: [modelConfigurationId], references: [id], onDelete: Restrict)
+  promptVersion      AiPromptVersion?               @relation(fields: [promptVersionId], references: [id], onDelete: Restrict)
+  references         AiRequestKnowledgeReference[]
+  usage              AiUsageRecord?
+  validations        AiResponseValidation[]
+
+  @@index([userId, createdAt])
+  @@index([assistantId, createdAt])
+  @@index([status])
+  @@map("ai_requests")
+}
+
+/// Approved knowledge used for a request. Only retrievable chunks may be recorded.
+model AiRequestKnowledgeReference {
+  id             String   @id @default(uuid()) @db.Uuid
+  requestId      String   @db.Uuid
+  rank           Int
+  sourceId       String   @db.Uuid
+  versionId      String   @db.Uuid
+  documentId     String   @db.Uuid
+  chunkId        String   @db.Uuid
+  sourceTitle    String   @db.VarChar(300)
+  pageNumber     Int?
+  pageEnd        Int?
+  sectionTitle   String?  @db.VarChar(300)
+  relevanceScore Float?
+  createdAt      DateTime @default(now())
+
+  request  AiRequest              @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  source   KnowledgeSource        @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  version  KnowledgeSourceVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  document KnowledgeDocument      @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  chunk    KnowledgeChunk         @relation(fields: [chunkId], references: [id], onDelete: Restrict)
+
+  @@unique([requestId, chunkId])
+  @@index([chunkId])
+  @@map("ai_request_knowledge_references")
+}
+
+/// Token and cost figures are null until a provider reports them.
+model AiUsageRecord {
+  id                   String        @id @default(uuid()) @db.Uuid
+  requestId            String        @unique @db.Uuid
+  assistantId          String        @db.Uuid
+  modelConfigurationId String?       @db.Uuid
+  modelId              String?       @db.Uuid
+  provider             String?       @db.VarChar(100)
+  inputTokens          Int?
+  outputTokens         Int?
+  totalTokens          Int?
+  estimatedCost        Decimal?      @db.Decimal(14, 6)
+  currency             String?       @db.VarChar(3)
+  durationMs           Int?
+  status               AiUsageStatus
+  recordedAt           DateTime      @default(now())
+
+  request            AiRequest                      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  assistant          AiAssistant                    @relation(fields: [assistantId], references: [id], onDelete: Restrict)
+  modelConfiguration AiAssistantModelConfiguration? @relation(fields: [modelConfigurationId], references: [id], onDelete: Restrict)
+  model              AiModel?                       @relation(fields: [modelId], references: [id], onDelete: Restrict)
+
+  @@index([assistantId, recordedAt])
+  @@index([provider, recordedAt])
+  @@index([status])
+  @@map("ai_usage_records")
+}
+
+model AiSafetyPolicy {
+  id                  String           @id @default(uuid()) @db.Uuid
+  code                String           @unique @db.VarChar(60)
+  name                String           @db.VarChar(150)
+  description         String?          @db.VarChar(2000)
+  category            AiSafetyCategory
+  status              AiRecordStatus   @default(DRAFT)
+  currentVersionId    String?          @unique @db.Uuid
+  latestVersionNumber Int              @default(0)
+  archivedAt          DateTime?
+  createdById         String           @db.Uuid
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  createdBy      User                    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  currentVersion AiSafetyPolicyVersion?  @relation("AiSafetyCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict)
+  versions       AiSafetyPolicyVersion[] @relation("AiSafetyPolicyVersions")
+
+  @@index([category])
+  @@index([status])
+  @@map("ai_safety_policies")
+}
+
+/// Immutable policy text and rules.
+model AiSafetyPolicyVersion {
+  id                 String   @id @default(uuid()) @db.Uuid
+  policyId           String   @db.Uuid
+  versionNumber      Int
+  instructions       String   @db.Text
+  /// Things a response must not do, e.g. "Do not recommend chemical doses".
+  restrictions       String[]
+  /// Words in a question or answer that make this policy relevant.
+  triggerKeywords    String[]
+  requiresEscalation Boolean  @default(false)
+  escalationGuidance String?  @db.VarChar(2000)
+  changeNote         String?  @db.VarChar(1000)
+  createdById        String   @db.Uuid
+  createdAt          DateTime @default(now())
+
+  policy    AiSafetyPolicy  @relation("AiSafetyPolicyVersions", fields: [policyId], references: [id], onDelete: Restrict)
+  currentOf AiSafetyPolicy? @relation("AiSafetyCurrentVersion")
+  createdBy User            @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([policyId, versionNumber])
+  @@map("ai_safety_policy_versions")
+}
+
+/// Result of rule-based response checks. Passing does not mean advice is safe.
+model AiResponseValidation {
+  id                 String             @id @default(uuid()) @db.Uuid
+  requestId          String             @db.Uuid
+  messageId          String?            @db.Uuid
+  validator          String             @db.VarChar(100)
+  status             AiValidationStatus
+  /// [{ check, policyVersionId?, result, detail? }]
+  checks             Json
+  warningCodes       String[]
+  requiresEscalation Boolean            @default(false)
+  validatedAt        DateTime           @default(now())
+
+  request AiRequest  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  message AiMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([requestId])
+  @@map("ai_response_validations")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications and communication (Phase 6)
+// ---------------------------------------------------------------------------
+
+enum NotificationCategory {
+  ACCOUNT
+  ACCOUNT_APPROVAL
+  COURSE
+  LEARNING
+  ASSESSMENT
+  GROUP
+  FACILITATOR
+  SYSTEM
+  SECURITY
+  GENERAL
+}
+
+enum NotificationChannel {
+  IN_APP
+  SMS
+  EMAIL
+  PUSH
+  USSD
+  IVR
+}
+
+/// SENT means a registered provider accepted the message. DELIVERED is reserved for IN_APP
+/// (the platform itself stores it) and for provider delivery receipts; nothing else sets it.
+enum NotificationDeliveryStatus {
+  QUEUED
+  PROCESSING
+  SENT
+  DELIVERED
+  FAILED
+  SKIPPED
+}
+
+enum NotificationTemplateStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+/// A notification in a user's inbox. Content is rendered from templates when it is created.
+model Notification {
+  id           String               @id @default(uuid()) @db.Uuid
+  userId       String               @db.Uuid
+  category     NotificationCategory
+  templateCode String               @db.VarChar(60)
+  title        String               @db.VarChar(200)
+  body         String               @db.Text
+  /// Language of the template that produced the content.
+  language     Language
+  /// Essential notifications ignore category opt-outs and quiet hours.
+  isEssential  Boolean              @default(false)
+  /// Optional reference to the business record, e.g. entityType "course", entityId "<uuid>".
+  entityType   String?              @db.VarChar(60)
+  entityId     String?              @db.VarChar(100)
+  /// Makes creation idempotent per user for the same business event.
+  dedupeKey    String?              @db.VarChar(200)
+  readAt       DateTime?
+  archivedAt   DateTime?
+  createdAt    DateTime             @default(now())
+
+  user       User                   @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, archivedAt, readAt, createdAt])
+  @@index([userId, category])
+  @@map("notifications")
+}
+
+/// One row per notification and channel, tracked independently.
+model NotificationDelivery {
+  id                String                     @id @default(uuid()) @db.Uuid
+  notificationId    String                     @db.Uuid
+  channel           NotificationChannel
+  status            NotificationDeliveryStatus
+  language          Language
+  templateVersionId String?                    @db.Uuid
+  subject           String?                    @db.VarChar(200)
+  /// Content rendered for this channel. Null when the delivery was skipped before rendering.
+  body              String?                    @db.Text
+  attempts          Int                        @default(0)
+  providerId        String?                    @db.VarChar(100)
+  providerMessageId String?                    @db.VarChar(200)
+  /// True when a test double handled the delivery. Never true in production.
+  isTestData        Boolean                    @default(false)
+  /// Why the delivery was skipped or failed, e.g. NOTIFICATION_PROVIDER_NOT_CONFIGURED.
+  reasonCode        String?                    @db.VarChar(60)
+  scheduledFor      DateTime?
+  queuedAt          DateTime?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  failedAt          DateTime?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  notification    Notification                 @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  templateVersion NotificationTemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: SetNull)
+
+  @@unique([notificationId, channel])
+  @@index([status, channel])
+  @@index([createdAt])
+  @@map("notification_deliveries")
+}
+
+/// One template per code, channel and language. Languages are written by people, never translated.
+model NotificationTemplate {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  code                String                     @db.VarChar(60)
+  channel             NotificationChannel
+  language            Language
+  name                String                     @db.VarChar(150)
+  description         String?                    @db.VarChar(2000)
+  category            NotificationCategory
+  status              NotificationTemplateStatus @default(DRAFT)
+  /// Seeded templates used by built-in business events. They cannot be archived.
+  isSystem            Boolean                    @default(false)
+  currentVersionId    String?                    @unique @db.Uuid
+  latestVersionNumber Int                        @default(0)
+  archivedAt          DateTime?
+  /// Null for seeded templates.
+  createdById         String?                    @db.Uuid
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  createdBy      User?                         @relation("NotificationTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  currentVersion NotificationTemplateVersion?  @relation("NotificationTemplateCurrent", fields: [currentVersionId], references: [id], onDelete: Restrict)
+  versions       NotificationTemplateVersion[] @relation("NotificationTemplateVersions")
+
+  @@unique([code, channel, language])
+  @@index([category, status])
+  @@map("notification_templates")
+}
+
+/// Immutable template text. Deliveries keep the id of the version they were rendered from.
+model NotificationTemplateVersion {
+  id            String   @id @default(uuid()) @db.Uuid
+  templateId    String   @db.Uuid
+  versionNumber Int
+  subject       String?  @db.VarChar(200)
+  body          String   @db.Text
+  /// [{ name, type: string|number|date|boolean, required, description?, maxLength? }]
+  variables     Json
+  changeNote    String?  @db.VarChar(1000)
+  createdById   String?  @db.Uuid
+  createdAt     DateTime @default(now())
+
+  template   NotificationTemplate   @relation("NotificationTemplateVersions", fields: [templateId], references: [id], onDelete: Restrict)
+  currentFor NotificationTemplate?  @relation("NotificationTemplateCurrent")
+  createdBy  User?                  @relation("NotificationTemplateVersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  deliveries NotificationDelivery[]
+
+  @@unique([templateId, versionNumber])
+  @@map("notification_template_versions")
+}
+
+/// Administrator policy per category.
+model NotificationCategorySetting {
+  category        NotificationCategory  @id
+  /// Essential categories ignore user opt-outs and quiet hours.
+  isEssential     Boolean               @default(false)
+  isActive        Boolean               @default(true)
+  allowedChannels NotificationChannel[]
+  description     String?               @db.VarChar(500)
+  updatedById     String?               @db.Uuid
+  updatedAt       DateTime              @updatedAt
+
+  updatedBy User? @relation("NotificationCategorySettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("notification_category_settings")
+}
+
+/// A channel can be enabled only while a provider is registered for it (IN_APP needs none).
+model NotificationChannelSetting {
+  channel     NotificationChannel @id
+  isEnabled   Boolean             @default(false)
+  updatedById String?             @db.Uuid
+  updatedAt   DateTime            @updatedAt
+
+  updatedBy User? @relation("NotificationChannelSettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("notification_channel_settings")
+}
+
+model NotificationPreference {
+  userId              String    @id @db.Uuid
+  /// Overrides the account language for notifications. Null means use the account language.
+  preferredLanguage   Language?
+  timeZone            String    @default("Africa/Kigali") @db.VarChar(64)
+  quietHoursEnabled   Boolean   @default(false)
+  /// Local HH:mm in timeZone.
+  quietHoursStart     String?   @db.VarChar(5)
+  quietHoursEnd       String?   @db.VarChar(5)
+  /// Account-level switch for everything that is not essential.
+  nonEssentialEnabled Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  user User @relation("UserNotificationPreference", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+model NotificationChannelPreference {
+  userId    String              @db.Uuid
+  channel   NotificationChannel
+  enabled   Boolean
+  updatedAt DateTime            @updatedAt
+
+  user User @relation("UserNotificationChannelPreferences", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channel])
+  @@map("notification_channel_preferences")
+}
+
+model NotificationCategoryPreference {
+  userId    String               @db.Uuid
+  category  NotificationCategory
+  enabled   Boolean
+  updatedAt DateTime             @updatedAt
+
+  user User @relation("UserNotificationCategoryPreferences", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, category])
+  @@map("notification_category_preferences")
+}
