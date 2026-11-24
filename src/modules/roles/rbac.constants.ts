@@ -77,6 +77,21 @@ export const Permission = {
   NotificationSettingsRead: 'notification-settings:read',
   NotificationSettingsManage: 'notification-settings:manage',
   NotificationDeliveriesRead: 'notification-deliveries:read',
+  ReportsRead: 'reports:read',
+  ReportsExport: 'reports:export',
+  FacilitatorReportsRead: 'facilitator-reports:read',
+  FacilitatorReportsExport: 'facilitator-reports:export',
+  FarmerReportsRead: 'farmer-reports:read',
+  UssdSessionsRead: 'ussd:sessions:read',
+  UssdSessionsManage: 'ussd:sessions:manage',
+  UssdConfigurationRead: 'ussd:configuration:read',
+  UssdConfigurationManage: 'ussd:configuration:manage',
+  UssdAnalyticsRead: 'ussd:analytics:read',
+  IvrSessionsRead: 'ivr:sessions:read',
+  IvrSessionsManage: 'ivr:sessions:manage',
+  IvrConfigurationRead: 'ivr:configuration:read',
+  IvrConfigurationManage: 'ivr:configuration:manage',
+  IvrAnalyticsRead: 'ivr:analytics:read',
 } as const;
 
 export type Permission = (typeof Permission)[keyof typeof Permission];
@@ -144,6 +159,21 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
     'Configure notification categories and enable or disable channels',
   'notification-deliveries:read':
     'View notification deliveries across all users (administrative oversight)',
+  'reports:read': 'View institutional reporting and analytics dashboards',
+  'reports:export': 'Export institutional report data as CSV',
+  'facilitator-reports:read': 'View reporting for own facilitator groups and their farmers',
+  'facilitator-reports:export': 'Export facilitator-scoped report data as CSV',
+  'farmer-reports:read': 'View own personal learning and progress reports',
+  'ussd:sessions:read': 'View USSD session records (administrative oversight)',
+  'ussd:sessions:manage': 'Terminate active USSD sessions',
+  'ussd:configuration:read': 'View USSD channel configuration',
+  'ussd:configuration:manage': 'Change USSD channel configuration',
+  'ussd:analytics:read': 'View USSD usage analytics',
+  'ivr:sessions:read': 'View IVR session records (administrative oversight)',
+  'ivr:sessions:manage': 'Terminate active IVR sessions',
+  'ivr:configuration:read': 'View IVR channel configuration',
+  'ivr:configuration:manage': 'Change IVR channel configuration',
+  'ivr:analytics:read': 'View IVR usage analytics',
 };
 
 export interface RoleDefinition {
@@ -182,6 +212,8 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       Permission.AiConversationsManage,
       Permission.NotificationsRead,
       Permission.NotificationsManage,
+      Permission.FacilitatorReportsRead,
+      Permission.FacilitatorReportsExport,
     ],
   },
   {
@@ -199,6 +231,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       Permission.AiConversationsManage,
       Permission.NotificationsRead,
       Permission.NotificationsManage,
+      Permission.FarmerReportsRead,
     ],
   },
   {
@@ -216,6 +249,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       Permission.AiConversationsManage,
       Permission.NotificationsRead,
       Permission.NotificationsManage,
+      Permission.FarmerReportsRead,
     ],
   },
 ];

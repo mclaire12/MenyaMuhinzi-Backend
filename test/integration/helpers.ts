@@ -6,6 +6,7 @@ import { seedCrops } from '../../prisma/seed-crops';
 import { seedKnowledgeTopics } from '../../prisma/seed-knowledge';
 import { seedNotifications } from '../../prisma/seed-notifications';
 import { seedRbac } from '../../prisma/seed-rbac';
+import { seedTelephony } from '../../prisma/seed-telephony';
 import { AppModule } from '../../src/app.module';
 import { normalizeRwandanPhone } from '../../src/common/utils/phone';
 import { setupApp } from '../../src/bootstrap/setup-app';
@@ -52,12 +53,27 @@ export interface ProviderOverride {
 export async function createTestContext(
   options: { overrides?: ProviderOverride[] } = {},
 ): Promise<TestContext> {
+  const redisStore = new Map<string, string>();
   const redisClient = {
     status: 'ready',
     ping: jest.fn().mockResolvedValue('PONG'),
     quit: jest.fn().mockResolvedValue('OK'),
     disconnect: jest.fn(),
     on: jest.fn(),
+    get: jest.fn(async (key: string) => redisStore.get(key) ?? null),
+    set: jest.fn(async (key: string, value: string, ...args: unknown[]) => {
+      redisStore.set(key, value);
+      const exIndex = args.indexOf('EX');
+      if (exIndex >= 0 && typeof args[exIndex + 1] === 'number') {
+        const ttlMs = (args[exIndex + 1] as number) * 1000;
+        setTimeout(() => redisStore.delete(key), ttlMs).unref?.();
+      }
+      return 'OK';
+    }),
+    del: jest.fn(async (key: string) => {
+      redisStore.delete(key);
+      return 1;
+    }),
   };
   const queues: Record<string, FakeQueue> = {};
 
@@ -105,6 +121,7 @@ export async function resetDatabase(prisma: PrismaService): Promise<void> {
   await seedCrops(prisma);
   await seedKnowledgeTopics(prisma);
   await seedNotifications(prisma);
+  await seedTelephony(prisma);
 }
 
 /**

@@ -8,6 +8,7 @@ import { seedCrops } from './seed-crops';
 import { seedKnowledgeTopics } from './seed-knowledge';
 import { seedNotifications } from './seed-notifications';
 import { seedRbac } from './seed-rbac';
+import { seedTelephony } from './seed-telephony';
 
 /**
  * Seeds roles, permissions, the initial crops, knowledge topics and notification templates, then the initial administrator when
@@ -28,6 +29,8 @@ async function main(): Promise<void> {
     console.log('Seeded knowledge topics');
     await seedNotifications(prisma);
     console.log('Seeded notification categories, channels and templates');
+    await seedTelephony(prisma);
+    console.log('Seeded telephony channel settings (USSD and IVR disabled)');
 
     const password = process.env.SEED_ADMIN_PASSWORD?.trim();
     if (!password) {

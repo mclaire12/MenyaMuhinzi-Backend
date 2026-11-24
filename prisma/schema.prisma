@@ -228,6 +228,9 @@ model User {
   notificationTemplateVersionsCreated NotificationTemplateVersion[]    @relation("NotificationTemplateVersionCreatedBy")
   notificationCategorySettingsUpdated NotificationCategorySetting[]    @relation("NotificationCategorySettingUpdatedBy")
   notificationChannelSettingsUpdated  NotificationChannelSetting[]     @relation("NotificationChannelSettingUpdatedBy")
+  ussdSessions                      UssdSession[]
+  ivrSessions                       IvrSession[]
+  telephonyChannelSettingsUpdated   TelephonyChannelSetting[]        @relation("TelephonyChannelSettingUpdatedBy")
 
   @@index([status])
   @@index([createdAt])
@@ -745,6 +748,7 @@ model CourseEnrollment {
   @@unique([userId, courseId])
   @@index([courseId, status])
   @@index([userId, status])
+  @@index([enrolledAt])
   @@map("course_enrollments")
 }
 
@@ -811,6 +815,7 @@ model LessonProgress {
   @@unique([userId, lessonId])
   @@index([userId, courseId])
   @@index([userId, moduleId])
+  @@index([lastAccessedAt])
   @@map("lesson_progress")
 }
 
@@ -825,11 +830,15 @@ model LearningSession {
   endedAt         DateTime?
   durationSeconds Int?
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson        Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  ussdSessions  UssdSession[]
+  ivrSessions   IvrSession[]
 
   @@index([userId, lessonId, status])
   @@index([userId, courseId])
+  @@index([startedAt])
+  @@index([channel, startedAt])
   @@map("learning_sessions")
 }
 
@@ -904,6 +913,8 @@ model AssessmentAttempt {
 
   @@unique([assessmentId, userId, attemptNumber])
   @@index([userId, assessmentId])
+  @@index([startedAt])
+  @@index([status, startedAt])
   @@map("assessment_attempts")
 }
 
@@ -2111,4 +2122,105 @@ model NotificationCategoryPreference {
 
   @@id([userId, category])
   @@map("notification_category_preferences")
+}
+
+// ---------------------------------------------------------------------------
+// Telephony: USSD and IVR session infrastructure (Phase 8)
+// ---------------------------------------------------------------------------
+
+enum TelephonySessionStatus {
+  ACTIVE
+  ENDED
+  EXPIRED
+}
+
+enum TelephonyEndReason {
+  USER_EXIT
+  TIMEOUT
+  PROVIDER_END
+  ERROR
+  ADMIN_TERMINATED
+  DUPLICATE
+}
+
+/// Provider-agnostic USSD session persisted for audit and admin oversight.
+model UssdSession {
+  id                 String                 @id @default(uuid()) @db.Uuid
+  providerId         String                 @db.VarChar(64)
+  providerSessionId  String                 @db.VarChar(128)
+  phoneNumber        String                 @db.VarChar(20)
+  userId             String?                @db.Uuid
+  language           Language?
+  status             TelephonySessionStatus @default(ACTIVE)
+  menuCode           String                 @default("MAIN") @db.VarChar(64)
+  state              Json                   @default("{}")
+  learningSessionId  String?                @db.Uuid
+  startedAt          DateTime               @default(now())
+  lastActivityAt     DateTime               @default(now())
+  endedAt            DateTime?
+  endReason          TelephonyEndReason?
+  requestCount       Int                    @default(0)
+  lastInputHash      String?                @db.VarChar(64)
+  isTestData         Boolean                @default(false)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  learningSession LearningSession? @relation(fields: [learningSessionId], references: [id], onDelete: SetNull)
+
+  @@unique([providerId, providerSessionId])
+  @@index([userId, startedAt])
+  @@index([status, lastActivityAt])
+  @@index([phoneNumber])
+  @@map("ussd_sessions")
+}
+
+/// Provider-agnostic IVR call session.
+model IvrSession {
+  id                 String                 @id @default(uuid()) @db.Uuid
+  providerId         String                 @db.VarChar(64)
+  providerSessionId  String                 @db.VarChar(128)
+  callSid            String?                @db.VarChar(128)
+  phoneNumber        String                 @db.VarChar(20)
+  userId             String?                @db.Uuid
+  language           Language?
+  status             TelephonySessionStatus @default(ACTIVE)
+  menuCode           String                 @default("MAIN") @db.VarChar(64)
+  state              Json                   @default("{}")
+  learningSessionId  String?                @db.Uuid
+  startedAt          DateTime               @default(now())
+  lastActivityAt     DateTime               @default(now())
+  endedAt            DateTime?
+  endReason          TelephonyEndReason?
+  requestCount       Int                    @default(0)
+  lastInputHash      String?                @db.VarChar(64)
+  isTestData         Boolean                @default(false)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  learningSession LearningSession? @relation(fields: [learningSessionId], references: [id], onDelete: SetNull)
+
+  @@unique([providerId, providerSessionId])
+  @@index([userId, startedAt])
+  @@index([status, lastActivityAt])
+  @@index([phoneNumber])
+  @@map("ivr_sessions")
+}
+
+/// USSD and IVR channel switches and limits. No telecom provider is integrated by default.
+model TelephonyChannelSetting {
+  channel            String   @id @db.VarChar(8)
+  isEnabled          Boolean  @default(false)
+  serviceCode        String?  @db.VarChar(32)
+  accessNumber       String?  @db.VarChar(32)
+  sessionTtlSeconds  Int
+  maxScreenChars     Int      @default(160)
+  menuVersion        String   @default("1") @db.VarChar(16)
+  updatedById        String?  @db.Uuid
+  updatedAt          DateTime @updatedAt
+
+  updatedBy User? @relation("TelephonyChannelSettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("telephony_channel_settings")
 }

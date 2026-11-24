@@ -97,6 +97,27 @@ export const notificationsConfig = registerAs('notifications', () => ({
   deliveryAttempts: Number(process.env.NOTIFICATIONS_DELIVERY_ATTEMPTS ?? 3),
 }));
 
+/** Reporting aggregates transactional data; there is no external analytics service. */
+export const reportsConfig = registerAs('reports', () => ({
+  /** Days used to decide whether an enrolled learner is active (session or lesson progress). */
+  activeLearnerDays: Number(process.env.REPORTS_ACTIVE_LEARNER_DAYS ?? 30),
+  /** Hard cap on CSV export rows; larger requests are refused. */
+  csvMaxRows: Number(process.env.REPORTS_CSV_MAX_ROWS ?? 10_000),
+}));
+
+/** No USSD aggregator is integrated: callbacks are validated and recorded; nothing is sent to a network. */
+export const ussdConfig = registerAs('ussd', () => ({
+  sessionTtlSeconds: Number(process.env.USSD_SESSION_TTL_SECONDS ?? 180),
+  maxScreenChars: Number(process.env.USSD_MAX_SCREEN_CHARS ?? 160),
+  callbackSecret: optional(process.env.USSD_CALLBACK_SECRET) ?? '',
+}));
+
+/** No IVR/voice provider is integrated: callbacks are validated and recorded; no audio is played. */
+export const ivrConfig = registerAs('ivr', () => ({
+  sessionTtlSeconds: Number(process.env.IVR_SESSION_TTL_SECONDS ?? 600),
+  callbackSecret: optional(process.env.IVR_CALLBACK_SECRET) ?? '',
+}));
+
 export const configNamespaces = [
   appConfig,
   loggerConfig,
@@ -110,4 +131,7 @@ export const configNamespaces = [
   knowledgeConfig,
   aiConfig,
   notificationsConfig,
+  reportsConfig,
+  ussdConfig,
+  ivrConfig,
 ];

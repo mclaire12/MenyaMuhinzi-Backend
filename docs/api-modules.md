@@ -141,3 +141,94 @@ Delivery reason codes: `NOTIFICATION_PROVIDER_NOT_CONFIGURED`, `NOTIFICATION_CHA
 `NOTIFICATION_CHANNEL_DISABLED_BY_USER`, `NOTIFICATION_NO_ADDRESS`, `NOTIFICATION_TEMPLATE_MISSING`,
 `NOTIFICATION_TEMPLATE_VARIABLES_INVALID`, `NOTIFICATION_PROVIDER_ERROR`,
 `NOTIFICATION_QUEUE_UNAVAILABLE`, `NOTIFICATION_USER_UNAVAILABLE`.
+
+## Reports (Phase 7)
+
+Aggregates over transactional data. See [architecture.md](architecture.md#reporting-foundation-phase-7).
+`startDate` is inclusive; `endDate` is exclusive (UTC).
+
+### Report permissions
+
+| Permission                                               | Granted to        |
+| -------------------------------------------------------- | ----------------- |
+| `reports:read`, `reports:export`                         | Admin             |
+| `facilitator-reports:read`, `facilitator-reports:export` | Facilitator       |
+| `farmer-reports:read`                                    | Both farmer roles |
+
+### Admin
+
+| Method and path                   | Purpose                                                   |
+| --------------------------------- | --------------------------------------------------------- |
+| `GET admin/reports/dashboard`     | Institutional overview                                    |
+| `GET admin/reports/users`         | Accounts by status and role                               |
+| `GET admin/reports/registrations` | Farmer registrations (`format=csv` with `reports:export`) |
+| `GET admin/reports/learning`      | Enrollments, channels, active learners                    |
+| `GET admin/reports/courses`       | Course catalogue counts                                   |
+| `GET admin/reports/assessments`   | Attempt outcomes and pass rates                           |
+| `GET admin/reports/facilitators`  | Facilitator activity                                      |
+| `GET admin/reports/groups`        | Group membership                                          |
+| `GET admin/reports/ai`            | AI requests and usage (null tokens stay null)             |
+| `GET admin/reports/knowledge`     | Sources, jobs, chunks                                     |
+| `GET admin/reports/notifications` | Delivery aggregates (`format=csv` supported)              |
+| `GET admin/reports/system`        | DB-backed queue snapshots, failures, recent audit         |
+
+### Facilitator
+
+| Method and path                       | Purpose                                     |
+| ------------------------------------- | ------------------------------------------- |
+| `GET facilitator/reports/dashboard`   | Own groups overview                         |
+| `GET facilitator/reports/groups`      | Own groups and members (no contact details) |
+| `GET facilitator/reports/learning`    | Learning for own farmers                    |
+| `GET facilitator/reports/assessments` | Assessments for own farmers                 |
+
+### Farmer
+
+| Method and path                | Purpose                                     |
+| ------------------------------ | ------------------------------------------- |
+| `GET farmer/reports/dashboard` | Own enrollments, progress, attempts, unread |
+| `GET farmer/reports/progress`  | Own course progress detail                  |
+
+## USSD and IVR (Phase 8)
+
+No telecom aggregator or audio provider is registered by default. Public callbacks require a
+configured adapter and its HMAC secret (`USSD_CALLBACK_SECRET` or `IVR_CALLBACK_SECRET`); requests
+are rejected when the secret is missing or the provider signature is invalid. The adapter parses
+provider-specific payloads and may supply a stable callback id for idempotency. Farmers are matched
+using normalized registered phone numbers and active account status, not JWT. A callback cannot
+change the owner of an existing session.
+
+### Permissions (admin only)
+
+`ussd:sessions:read|manage`, `ussd:configuration:read|manage`, `ussd:analytics:read`,
+`ivr:sessions:read|manage`, `ivr:configuration:read|manage`, `ivr:analytics:read`
+
+### Callbacks
+
+| Method and path    | Purpose                          |
+| ------------------ | -------------------------------- |
+| `POST ussd/callback` | Signed USSD provider webhook (`@Public`); adapter returns continue/end response |
+| `POST ivr/callback`  | Signed IVR provider webhook (`@Public`); adapter formats DTMF/audio commands |
+
+### Admin
+
+| Method and path                              | Purpose                |
+| -------------------------------------------- | ---------------------- |
+| `GET|PATCH admin/ussd/configuration`       | USSD channel settings  |
+| `GET admin/ussd/sessions`                    | List USSD sessions     |
+| `GET admin/ussd/sessions/:id`                | Session detail         |
+| `POST admin/ussd/sessions/:id/terminate`     | Force-end session      |
+| `GET admin/ussd/analytics`                   | Session aggregates     |
+| `GET|PATCH admin/ivr/configuration`        | IVR channel settings   |
+| `GET admin/ivr/sessions`                     | List IVR sessions      |
+| `GET admin/ivr/sessions/:id`                 | Session detail         |
+| `POST admin/ivr/sessions/:id/terminate`      | Force-end session      |
+| `GET admin/ivr/analytics`                    | Session aggregates     |
+
+USSD offers Kinyarwanda/English menus, visible courses, modules, lessons, lesson-content
+pagination, progress, resume and explicit lesson completion. IVR supports language choice and
+DTMF navigation through the same published course and lesson catalogue. Lesson audio commands are
+created only through a registered `AUDIO_PROVIDERS` implementation; there is no default/mock
+playback provider. USSD also supports published multiple-choice and true/false assessments for
+enrolled courses, with answers graded by the existing assessment service. Short-answer assessments
+and IVR assessment flows are not available. Learning channel and progress state are shared with the
+existing WEB/MOBILE APIs.

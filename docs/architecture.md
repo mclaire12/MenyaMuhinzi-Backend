@@ -34,6 +34,7 @@ global filter (`P2002` → `409`, `P2025` → `404`).
 | 4     | Knowledge base: sources, versions, processing into chunks, review/approval, search rules |
 | 5     | AI assistant management and orchestration foundation                                     |
 | 6     | Notification and communication foundation (in-app inbox, templates, preferences)         |
+| 7     | Reporting, analytics and monitoring (aggregates over transactional data, CSV export)     |
 
 ## Queues
 
@@ -241,9 +242,190 @@ legacy `notifications` queue. Nothing consumes them. They predate Phase 6 and we
 so earlier behaviour is unchanged; they should be removed or redesigned (no token in the job)
 before any email or SMS password-reset delivery is built.
 
+## Reporting foundation (Phase 7)
+
+### What is and is not implemented
+
+Implemented: institutional, facilitator-scoped and farmer-personal report endpoints; date-range
+filters; active-learner window (`REPORTS_ACTIVE_LEARNER_DAYS`); CSV export for selected admin
+reports with formula sanitisation and row limits; indexes on enrollment, session, attempt and
+progress timestamps.
+
+Not implemented: no BI warehouse, no nightly rollup tables, no live BullMQ Redis depth API, no PDF
+or Excel export, no cross-role report caching.
+
+### Calculation definitions
+
+| Metric                         | Definition                                                                                                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Date range                     | `startDate` inclusive, `endDate` exclusive (UTC)                                                                      |
+| Active learner                 | `ACTIVE` enrollment and a learning session or lesson progress touch within the last N days ending at `endDate` or now |
+| Course completion rate         | `COMPLETED / (ACTIVE + COMPLETED)` for a course; `null` when both are zero                                            |
+| Assessment pass rate           | `PASSED / (PASSED + FAILED)`; in-progress attempts are abandoned, not failures                                        |
+| Knowledge processing success   | `COMPLETED / (COMPLETED + FAILED)` jobs                                                                               |
+| AI tokens                      | Sum of non-null provider-reported values; `NOT_AVAILABLE` records counted separately                                  |
+| External notification delivery | Never claimed as `DELIVERED` without a provider receipt (only IN_APP is delivered today)                              |
+
+### Authorization
+
+Administrators use `reports:read` / `reports:export`. Facilitators use `facilitator-reports:*` and
+may only see farmers in groups they lead. Farmers use `farmer-reports:read` for their own rows.
+Export actions write an audit entry without storing exported row contents.
+
+### Indexes (migration `20261123084214_phase7_reports_indexes`)
+
+`course_enrollments(enrolledAt)`, `learning_sessions(startedAt)`, `learning_sessions(channel, startedAt)`,
+`assessment_attempts(startedAt)`, `assessment_attempts(status, startedAt)`,
+`lesson_progress(lastAccessedAt)`.
+
+## USSD and IVR (Phase 8)
+
+Telephony channels are adapters around the existing LMS, not separate learning systems. The
+registered adapter verifies and parses provider-specific input; `TelephonyLearningService` applies
+course visibility and enrollment checks; progress and learning-session writes use the existing
+services. PostgreSQL is the source of truth for sessions and learning history. Redis stores expiring
+menu-state cache entries; session state is also persisted in PostgreSQL for recovery. No provider
+adapter or audio provider is registered by default.
+
+### USSD architecture
+
+```mermaid
+flowchart LR
+  F[Basic-phone farmer] -->|USSD callback| C[POST /api/v1/ussd/callback]
+  C --> V[Signature verification]
+  V --> A[UssdGatewayAdapter: parse / normalize / format]
+  A --> G[UssdGatewayService]
+  G --> I[FarmerIdentityService]
+  G --> M[USSD menu engine]
+  M --> L[TelephonyLearningService]
+  L --> AS[AssessmentsService]
+  L --> E[EnrollmentsService]
+  L --> P[ProgressService]
+  AS --> D
+  L --> D[(PostgreSQL LMS + session records)]
+  G --> R[(Redis expiring state cache)]
+  G --> A
+```
+
+### IVR architecture
+
+```mermaid
+flowchart LR
+  F[Caller] -->|DTMF callback| C[POST /api/v1/ivr/callback]
+  C --> V[Signature verification]
+  V --> A[IvrGatewayAdapter: parse / normalize / format]
+  A --> G[IvrGatewayService]
+  G --> I[FarmerIdentityService]
+  G --> M[IVR DTMF menu engine]
+  M --> L[TelephonyLearningService]
+  L --> E[EnrollmentsService]
+  L --> P[ProgressService]
+  G --> AU[IvrAudioService]
+  AU -->|AudioPlaybackCommand| A
+  L --> D[(PostgreSQL LMS + session records)]
+  G --> R[(Redis expiring state cache)]
+```
+
+The audio boundary only creates a provider command; it does not play or deliver audio itself.
+Without an `AUDIO_PROVIDERS` implementation, lesson playback returns an explicit unavailable
+response and does not create a learning session for audio that was not delivered.
+
+### USSD session lifecycle
+
+```mermaid
+stateDiagram-v2
+  [*] --> CallbackValidation
+  CallbackValidation --> IdentityCheck: valid signature
+  CallbackValidation --> Rejected: missing / invalid signature
+  IdentityCheck --> ACTIVE: registered active farmer / new session
+  IdentityCheck --> Rejected: unknown, inactive, or mismatched farmer
+  ACTIVE --> ACTIVE: menu choice / provider callback
+  ACTIVE --> ACTIVE: duplicate provider request id (no repeated action)
+  ACTIVE --> ENDED: farmer exit / provider end / admin terminate
+  ACTIVE --> EXPIRED: inactivity exceeds configured TTL
+```
+
+### IVR call lifecycle
+
+```mermaid
+stateDiagram-v2
+  [*] --> CallbackValidation
+  CallbackValidation --> FarmerIdentification: signature valid
+  CallbackValidation --> Rejected: signature absent / invalid
+  FarmerIdentification --> LANGUAGE: active registered farmer
+  FarmerIdentification --> Rejected: unknown / inactive / mismatched farmer
+  LANGUAGE --> MAIN: DTMF language choice
+  MAIN --> COURSE_SELECTION: learn / my courses
+  COURSE_SELECTION --> LESSON: authorized published lesson selected
+  LESSON --> LESSON: audio command available / repeat
+  LESSON --> MAIN: finish / return
+  MAIN --> ENDED: caller exits
+  LANGUAGE --> EXPIRED: session TTL exceeded
+  MAIN --> EXPIRED: session TTL exceeded
+  LESSON --> EXPIRED: session TTL exceeded
+```
+
+### Cross-channel learning synchronization
+
+```mermaid
+sequenceDiagram
+  participant U as USSD / IVR adapter
+  participant T as TelephonyLearningService
+  participant E as EnrollmentsService
+  participant P as ProgressService
+  participant DB as Shared PostgreSQL LMS
+  participant W as WEB / MOBILE API
+  U->>T: identify farmer + select published course
+  T->>E: authorize or create existing enrollment
+  E->>DB: upsert/reuse one farmer-course enrollment
+  U->>T: select lesson / complete lesson
+  T->>P: start/close learning session and update progress
+  P->>DB: shared LearningSession + LessonProgress
+  W->>DB: read the same enrollment and progress rows
+  DB-->>W: synchronized learning history
+```
+
+### Provider payload and security boundary
+
+Adapters own the provider-specific payload contract. The included test adapters accept an example
+shape such as:
+
+```json
+{
+  "sessionId": "provider-session-123",
+  "callbackId": "provider-event-456",
+  "phoneNumber": "+250788123456",
+  "text": "1"
+}
+```
+
+The IVR test adapter uses `digits` instead of `text`. Signatures use the configured channel-specific
+secret; the test adapters use `x-ussd-signature` and `x-ivr-signature`. Stable provider callback ids
+are used for retry idempotency. Without one, identical DTMF/menu input may be a valid next choice,
+so adapters must supply an id where the provider supports it. Callbacks are globally rate-limited
+by the existing HTTP throttler. No provider secrets, authentication tokens, or farmer details are
+logged.
+
+| Token                     | Interface                 | Default   |
+| ------------------------- | ------------------------- | --------- |
+| `USSD_GATEWAY_PROVIDERS`  | `UssdGatewayAdapter[]`    | `[]`      |
+| `IVR_GATEWAY_PROVIDERS`   | `IvrGatewayAdapter[]`     | `[]`      |
+| `AUDIO_PROVIDERS`         | `AudioProvider[]`         | `[]`      |
+
+Migration: `20261123120000_phase8_ussd_ivr_foundation` (`ussd_sessions`, `ivr_sessions`, and
+`telephony_channel_settings` with CHECK constraints on channel, TTL and screen length). Channel
+settings are disabled until enabled by an administrator. Session expiry is enforced when callbacks
+arrive; persistent progress does not depend on Redis.
+
+USSD exposes published multiple-choice and true/false assessments for enrolled courses. Answers are
+graded by `AssessmentsService`; correct answers are not included in the menu state or prompts, and
+an in-progress attempt is reused after a callback retry. Short-answer assessments and IVR assessment
+flows are not exposed. No real telecom, text-to-speech, or audio-asset provider is connected.
+
 ## Security
 
 Passwords are stored as hashes only; hashes and tokens never appear in responses. Secrets come
 from environment variables (`.env.example` lists them without values). AI model metadata and
 configuration are scanned for secret-like content and rejected without echoing it. Users can only
 see their own conversations and requests; administrators viewing someone else's are audited.
+Reports omit phone numbers, emails, tokens and notification bodies.

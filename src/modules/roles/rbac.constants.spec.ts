@@ -53,6 +53,18 @@ describe('RBAC catalogue', () => {
       Permission.NotificationSettingsRead,
       Permission.NotificationSettingsManage,
       Permission.NotificationDeliveriesRead,
+      Permission.ReportsRead,
+      Permission.ReportsExport,
+      Permission.UssdSessionsRead,
+      Permission.UssdSessionsManage,
+      Permission.UssdConfigurationRead,
+      Permission.UssdConfigurationManage,
+      Permission.UssdAnalyticsRead,
+      Permission.IvrSessionsRead,
+      Permission.IvrSessionsManage,
+      Permission.IvrConfigurationRead,
+      Permission.IvrConfigurationManage,
+      Permission.IvrAnalyticsRead,
     ];
     for (const role of ROLE_DEFINITIONS.filter((r) => r.code !== RoleCode.Admin)) {
       expect(role.permissions.filter((p) => privileged.includes(p))).toEqual([]);

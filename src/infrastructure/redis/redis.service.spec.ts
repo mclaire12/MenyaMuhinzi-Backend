@@ -8,6 +8,9 @@ describe('RedisService', () => {
       ping: jest.fn().mockResolvedValue('PONG'),
       quit: jest.fn().mockResolvedValue('OK'),
       disconnect: jest.fn(),
+      get: jest.fn(),
+      set: jest.fn(),
+      del: jest.fn(),
     }) as unknown as jest.Mocked<Redis>;
 
   it('pings Redis when the connection is ready', async () => {
@@ -23,6 +26,18 @@ describe('RedisService', () => {
       'Redis connection is not ready (status: reconnecting)',
     );
     expect(client.ping).not.toHaveBeenCalled();
+  });
+
+  it('stores and reads JSON values with optional TTL', async () => {
+    const client = createClient('ready');
+    client.get.mockResolvedValue('{"ok":true}');
+    const redis = new RedisService(client);
+
+    await expect(redis.getJson<{ ok: boolean }>('cache:key')).resolves.toEqual({ ok: true });
+    await redis.setJson('cache:key', { ok: true }, 30);
+    expect(client.set).toHaveBeenCalledWith('cache:key', '{"ok":true}', 'EX', 30);
+    await redis.del('cache:key');
+    expect(client.del).toHaveBeenCalledWith('cache:key');
   });
 
   it('closes the connection on shutdown', async () => {

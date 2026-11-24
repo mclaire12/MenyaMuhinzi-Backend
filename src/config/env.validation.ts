@@ -244,6 +244,39 @@ export class EnvironmentVariables {
   @Min(1)
   @Max(10)
   NOTIFICATIONS_DELIVERY_ATTEMPTS: number = 3;
+
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  REPORTS_ACTIVE_LEARNER_DAYS: number = 30;
+
+  @IsInt()
+  @Min(100)
+  @Max(100_000)
+  REPORTS_CSV_MAX_ROWS: number = 10_000;
+
+  @IsInt()
+  @Min(30)
+  @Max(3600)
+  USSD_SESSION_TTL_SECONDS: number = 180;
+
+  @IsInt()
+  @Min(40)
+  @Max(500)
+  USSD_MAX_SCREEN_CHARS: number = 160;
+
+  @IsOptional()
+  @IsString()
+  USSD_CALLBACK_SECRET?: string;
+
+  @IsInt()
+  @Min(60)
+  @Max(7200)
+  IVR_SESSION_TTL_SECONDS: number = 600;
+
+  @IsOptional()
+  @IsString()
+  IVR_CALLBACK_SECRET?: string;
 }
 
 /**

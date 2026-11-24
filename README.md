@@ -4,13 +4,11 @@ Backend API for **MenyaMuhinzi**, an AI-powered agricultural e-learning platform
 farmers. It will serve administrators, agricultural facilitators/agronomists, smartphone farmers
 and basic-phone farmers (USSD / IVR).
 
-> **Status: Phase 6 – notification and communication management foundation.** Authentication,
-> groups, courses, learning, the knowledge base and the AI foundation remain in place. Users now
-> have an in-app notification inbox, multilingual notification templates, delivery tracking and
-> communication preferences. **No SMS, email, push, USSD, IVR or other delivery provider is
-> connected and no external request is made**: only the in-app inbox delivers. Other channels are
-> recorded as skipped or failed with a reason, and nothing is reported as sent without a provider.
-> **No AI provider, language model, embedding model or vector database is connected** either.
+> **Status: Phase 8 – USSD and IVR infrastructure.** Phases 0–7 remain in place. Basic-phone farmers
+> are identified on telephony callbacks by E.164 `phoneNumber` (not JWT login). USSD menus and IVR
+> DTMF flows reuse enrollments, lesson progress and learning sessions on `LearningChannel.USSD` /
+> `IVR`. **No telecom aggregator or audio/voice provider is connected.** Login remains email and
+> password only.
 
 ## Tech stack
 
@@ -126,8 +124,10 @@ src/
     knowledge/             Knowledge base and retrieval rules (Phase 4)
     ai/                    AI assistants, models, prompts, safety, conversations, orchestration (Phase 5)
     notifications/         Inbox, templates, preferences, settings, delivery, provider interfaces (Phase 6)
-    media, ussd, ivr, reports, settings
-                           Empty shells for later phases
+    reports/               Admin, facilitator and farmer analytics and CSV export (Phase 7)
+    telephony/             Shared farmer identity and learning adapters for USSD/IVR (Phase 8)
+    ussd/, ivr/            Session stores, gateway adapters, menus, admin configuration (Phase 8)
+    media, settings        Reserved for later phases
     feature-modules.ts     Registry of all business modules imported by AppModule
   generated/prisma/        Generated Prisma client (git-ignored)
 test/
@@ -445,6 +445,38 @@ receipt handler; none exists yet. The integration tests use a clearly marked tes
 token in plaintext and have no consumer; this predates Phase 6 and is not changed here. Set
 `NOTIFICATIONS_WORKER_ENABLED=false` on instances that should not consume deliveries.
 
+## Reporting and analytics (Phase 7)
+
+Reports aggregate existing transactional tables. There is no analytics warehouse, no BI vendor and
+no fabricated figures. Unavailable metrics are labelled (for example AI token totals that stay
+`null`, knowledge retrieval until a vector store exists, live BullMQ Redis depths).
+
+**Date filters.** `startDate` is inclusive and `endDate` is exclusive (UTC). Example:
+`startDate=2026-01-01T00:00:00.000Z&endDate=2026-02-01T00:00:00.000Z` covers January.
+
+**Active learners.** An enrolled farmer (`ACTIVE` enrollment) is active when they have a learning
+session `startedAt` or lesson progress `lastAccessedAt`/`updatedAt` within the last
+`REPORTS_ACTIVE_LEARNER_DAYS` (default 30) ending at `endDate` or now. Inactive = enrolled but
+outside that window.
+
+**Permissions.** `reports:read` / `reports:export` (admin), `facilitator-reports:read` /
+`facilitator-reports:export` (facilitator, own groups only), `farmer-reports:read` (own data only).
+
+**Admin** (`/admin/reports/...`): `dashboard`, `users`, `registrations`, `learning`, `courses`,
+`assessments`, `facilitators`, `groups`, `ai`, `knowledge`, `notifications`, `system`. CSV export
+via `?format=csv` on `registrations` and `notifications` (requires `reports:export`). Cells that
+look like spreadsheet formulas are prefixed. Row count is capped by `REPORTS_CSV_MAX_ROWS`. Exports
+never include phone numbers, emails, passwords, tokens or notification bodies.
+
+**Facilitator** (`/facilitator/reports/...`): `dashboard`, `groups`, `learning`, `assessments`,
+scoped to the caller’s groups (`groupId` belonging to someone else returns `404`).
+
+**Farmer** (`/farmer/reports/...`): `dashboard`, `progress` for the authenticated user only.
+
+**System report.** Queue figures come from durable DB rows (AI requests, notification deliveries,
+knowledge jobs), not live Redis. Recent audit events omit `details` payloads that may contain
+sensitive content.
+
 ## Error responses
 
 Every error uses the same envelope:
@@ -506,11 +538,34 @@ the queues are still test doubles. The database is `TEST_DATABASE_URL` when set,
 setup creates it if needed, applies migrations and seeds the roles. Tests then truncate it between
 cases, and the setup refuses to run against any database whose name does not end in `_test`.
 
+## USSD and IVR (Phase 8)
+
+Provider-independent telephony infrastructure for registered basic-phone farmers. Public callback
+routes require an adapter-verified signature using `USSD_CALLBACK_SECRET` or `IVR_CALLBACK_SECRET`;
+callbacks are rejected when the corresponding secret is unset. Provider adapters validate and
+normalize their own payload formats. Test doubles live in `test/fixtures/ussd-test-doubles.ts` and
+`test/fixtures/ivr-test-doubles.ts` (`test-ussd` / `test-ivr`, headers `x-ussd-signature` /
+`x-ivr-signature`).
+
+- `POST /ussd/callback` — USSD gateway (no aggregator registered by default)
+- `POST /ivr/callback` — IVR gateway (lesson audio unavailable until `AUDIO_PROVIDERS` is bound)
+- `GET|PATCH /admin/ussd/configuration`, `GET /admin/ussd/sessions`, `POST .../terminate`, `GET /admin/ussd/analytics`
+- Same shape under `/admin/ivr/*`
+- Ten new admin permissions (`ussd:*`, `ivr:*`); total permissions **71**
+
+Channels are disabled in seed data until an administrator enables them. Progress recorded through
+telephony uses the same visibility checks, enrollments, `lesson_progress` rows and
+`learning_sessions` as web/mobile APIs. USSD supports bilingual menus, paged course/module/lesson
+selection, lesson pagination, resume and explicit completion. IVR supports bilingual DTMF
+navigation and emits a provider audio command only when a playback provider is configured; it never
+claims unavailable audio was delivered. USSD supports published multiple-choice and true/false
+assessments for enrolled courses; server-side grading uses the existing assessment service. Short
+answers and IVR assessment flows are not supported. No real telecom or audio provider is configured,
+so actual calls and USSD delivery are not available in this phase.
+
 ## Roadmap
 
-Phase 0 foundation → Phase 1 authentication & users → Phase 2 groups & courses →
-Phase 3 learning → Phase 4 knowledge base & RAG foundation → Phase 5 AI assistant management &
-orchestration foundation → Phase 6 notification & communication foundation (current) → real AI
-provider integration, real SMS/email/push providers, media delivery, and USSD/IVR providers.
+Phase 0 foundation → … → Phase 7 reporting & analytics → Phase 8 USSD/IVR infrastructure (current)
+→ real telecom/audio providers, media delivery, AI provider integration.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/api-modules.md](docs/api-modules.md).

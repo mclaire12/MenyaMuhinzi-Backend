@@ -9,5 +9,6 @@ import { AssessmentsService } from './assessments.service';
   imports: [NotificationsModule, CoursesModule, EnrollmentsModule],
   controllers: [AssessmentsController],
   providers: [AssessmentsService],
+  exports: [AssessmentsService],
 })
 export class AssessmentsModule {}

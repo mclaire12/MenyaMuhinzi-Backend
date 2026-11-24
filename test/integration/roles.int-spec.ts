@@ -49,6 +49,8 @@ describe('Roles and permissions (integration)', () => {
       'courses:read',
       'crops:read',
       'enrollments:read',
+      'facilitator-reports:export',
+      'facilitator-reports:read',
       'farmer-groups:manage',
       'farmer-groups:read',
       'farmers:read',
@@ -65,7 +67,7 @@ describe('Roles and permissions (integration)', () => {
       .get(`${API}/roles/permissions`)
       .set(...bearer(admin.accessToken))
       .expect(200);
-    expect(permissions.body).toHaveLength(56);
+    expect(permissions.body).toHaveLength(71);
   });
 
   it('changes role permissions with immediate effect', async () => {
