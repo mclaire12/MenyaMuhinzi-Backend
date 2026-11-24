@@ -54,6 +54,17 @@ export const jwtConfig = registerAs('jwt', () => ({
   audience: process.env.JWT_AUDIENCE ?? 'menyamuhinzi-clients',
 }));
 
+export const webSessionConfig = registerAs('webSession', () => ({
+  hashSecret: process.env.WEB_SESSION_HASH_SECRET as string,
+  previousHashSecret: optional(process.env.WEB_SESSION_HASH_SECRET_PREVIOUS),
+  encryptionKey: process.env.WEB_SESSION_ENCRYPTION_KEY as string,
+  encryptionKeyVersion: Number(process.env.WEB_SESSION_ENCRYPTION_KEY_VERSION ?? 1),
+  idleTtl: process.env.WEB_SESSION_IDLE_TTL ?? '30m',
+  absoluteTtl: process.env.WEB_SESSION_ABSOLUTE_TTL ?? '12h',
+  lockTtlMs: Number(process.env.WEB_SESSION_LOCK_TTL_MS ?? 5000),
+  bffSharedSecret: process.env.MENYA_BFF_SHARED_SECRET as string,
+}));
+
 export const authConfig = registerAs('auth', () => ({
   maxFailedLogins: Number(process.env.AUTH_MAX_FAILED_LOGINS ?? 5),
   lockoutMinutes: Number(process.env.AUTH_LOCKOUT_MINUTES ?? 15),
@@ -61,6 +72,36 @@ export const authConfig = registerAs('auth', () => ({
   farmerRequiresApproval: process.env.AUTH_FARMER_REQUIRES_APPROVAL !== 'false',
   exposeResetToken:
     process.env.AUTH_EXPOSE_RESET_TOKEN === 'true' && process.env.NODE_ENV !== 'production',
+  passwordResetWorkerEnabled: process.env.PASSWORD_RESET_WORKER_ENABLED !== 'false',
+}));
+
+export const frontendConfig = registerAs('frontend', () => ({
+  siteOrigin: optional(process.env.FRONTEND_SITE_ORIGIN)?.replace(/\/+$/, ''),
+}));
+
+export const oauthConfig = registerAs('oauth', () => {
+  const googleClientId = optional(process.env.GOOGLE_OAUTH_CLIENT_ID);
+  const googleClientSecret = optional(process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+  return {
+    googleClientId,
+    googleClientSecret,
+    googleEnabled: Boolean(googleClientId && googleClientSecret),
+  };
+});
+
+export const smtpConfig = registerAs('smtp', () => ({
+  host: optional(process.env.SMTP_HOST),
+  port: Number(process.env.SMTP_PORT ?? 587),
+  user: optional(process.env.SMTP_USER),
+  password: optional(process.env.SMTP_PASSWORD),
+  from: optional(process.env.SMTP_FROM),
+  secure: process.env.SMTP_SECURE === 'true',
+}));
+
+export const smsConfig = registerAs('sms', () => ({
+  twilioAccountSid: optional(process.env.TWILIO_ACCOUNT_SID),
+  twilioAuthToken: optional(process.env.TWILIO_AUTH_TOKEN),
+  twilioFrom: optional(process.env.TWILIO_FROM_NUMBER),
 }));
 
 export const rateLimitConfig = registerAs('rateLimit', () => ({
@@ -126,7 +167,12 @@ export const configNamespaces = [
   redisConfig,
   queueConfig,
   jwtConfig,
+  webSessionConfig,
   authConfig,
+  frontendConfig,
+  oauthConfig,
+  smtpConfig,
+  smsConfig,
   rateLimitConfig,
   knowledgeConfig,
   aiConfig,

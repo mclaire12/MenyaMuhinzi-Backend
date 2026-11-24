@@ -48,6 +48,7 @@ import type {
   ForgotPasswordResponseDto,
   RegistrationResponseDto,
 } from './dto/auth-response.dto';
+import { PasswordResetDeliveryStoreService } from './delivery/password-reset-delivery-store.service';
 import { PasswordHasher } from './services/password-hasher.service';
 import { TokenService } from './services/token.service';
 
@@ -57,13 +58,9 @@ const INVALID_CREDENTIALS = 'Invalid phone number, email or password';
 const FORGOT_PASSWORD_MESSAGE =
   'If an active account matches, password reset instructions have been sent.';
 
+/** BullMQ payload: reference only — no reset token, destination, or secrets. */
 export interface PasswordResetJob {
-  userId: string;
-  channel: 'sms' | 'email';
-  destination: string;
-  token: string;
-  expiresAt: string;
-  language: string;
+  deliveryId: string;
 }
 
 @Injectable()
@@ -76,6 +73,7 @@ export class AuthService {
     private readonly tokens: TokenService,
     private readonly provisioning: UserProvisioningService,
     private readonly publisher: NotificationPublisher,
+    private readonly passwordResetDeliveries: PasswordResetDeliveryStoreService,
     @Inject(authConfig.KEY) private readonly config: ConfigType<typeof authConfig>,
     @InjectQueue(QueueName.Notifications) private readonly notifications: Queue,
   ) {}
@@ -114,7 +112,38 @@ export class AuthService {
     };
   }
 
+  /** Validates email/password and applies the same ACTIVE-account rules as `login`, without issuing JWTs. */
+  async authenticateActiveLogin(
+    dto: LoginDto,
+    client: ClientContext,
+  ): Promise<{ userId: string; passwordChangedAt: Date | null }> {
+    const authenticated = await this.verifyLoginCredentials(dto, client);
+    await this.recordAttempt(dto.email, LoginAttemptOutcome.SUCCESS, client, authenticated.userId);
+    return authenticated;
+  }
+
   async login(dto: LoginDto, client: ClientContext): Promise<AuthTokensResponseDto> {
+    const authenticated = await this.authenticateActiveLogin(dto, client);
+    const profile = await this.prisma.user.findUniqueOrThrow({
+      where: { id: authenticated.userId },
+      select: userSummarySelect,
+    });
+
+    const { refreshTokenId: _id, ...tokens } = await this.tokens.issue(
+      {
+        id: authenticated.userId,
+        roles: profile.roles.map(({ role }) => role.code as RoleCode),
+        passwordChangedAt: authenticated.passwordChangedAt,
+      },
+      client,
+    );
+    return { ...tokens, user: toUserResponse(profile) };
+  }
+
+  private async verifyLoginCredentials(
+    dto: LoginDto,
+    client: ClientContext,
+  ): Promise<{ userId: string; passwordChangedAt: Date | null }> {
     const email = dto.email;
     const user = await this.prisma.user.findFirst({
       where: { deletedAt: null, email },
@@ -124,12 +153,11 @@ export class AuthService {
         status: true,
         lockedUntil: true,
         passwordChangedAt: true,
-        roles: { select: { role: { select: { code: true } } } },
       },
     });
 
     if (!user) {
-      await this.hasher.verify(dto.password, null); // equalise timing with the found-user path
+      await this.hasher.verify(dto.password, null);
       await this.recordAttempt(email, LoginAttemptOutcome.UNKNOWN_IDENTIFIER, client);
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
@@ -154,32 +182,21 @@ export class AuthService {
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
 
-    // Status is only revealed once the password has been verified.
     if (user.status !== UserStatus.ACTIVE) {
       await this.recordAttempt(email, LoginAttemptOutcome.ACCOUNT_NOT_ACTIVE, client, user.id);
       throw new ForbiddenException(accountStatusMessage(user.status));
     }
 
-    const profile = await this.prisma.user.update({
+    await this.prisma.user.update({
       where: { id: user.id },
       data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
-      select: userSummarySelect,
     });
-    await this.recordAttempt(email, LoginAttemptOutcome.SUCCESS, client, user.id);
 
-    const { refreshTokenId: _id, ...tokens } = await this.tokens.issue(
-      {
-        id: user.id,
-        roles: user.roles.map(({ role }) => role.code as RoleCode),
-        passwordChangedAt: user.passwordChangedAt,
-      },
-      client,
-    );
-    return { ...tokens, user: toUserResponse(profile) };
+    return { userId: user.id, passwordChangedAt: user.passwordChangedAt };
   }
 
   async refresh(refreshToken: string, client: ClientContext): Promise<AuthTokensResponseDto> {
-    const { userId, ...tokens } = await this.tokens.rotate(refreshToken, client);
+    const { userId, refreshTokenId: _rtid, ...tokens } = await this.tokens.rotate(refreshToken, client);
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       select: userSummarySelect,
@@ -234,31 +251,40 @@ export class AuthService {
 
     const token = this.tokens.generateOpaqueToken(32);
     const expiresAt = new Date(Date.now() + this.config.passwordResetTtlMinutes * 60_000);
-    await this.prisma.$transaction([
-      this.prisma.passwordResetToken.updateMany({
+    const channel: 'sms' | 'email' =
+      identifier.kind === 'email' && user.email ? 'email' : 'sms';
+    const destination =
+      identifier.kind === 'email' && user.email ? user.email : user.phoneNumber;
+
+    await this.passwordResetDeliveries.invalidatePendingForUser(user.id);
+
+    const createdToken = await this.prisma.$transaction(async (tx) => {
+      await tx.passwordResetToken.updateMany({
         where: { userId: user.id, usedAt: null },
         data: { usedAt: new Date() },
-      }),
-      this.prisma.passwordResetToken.create({
+      });
+      return tx.passwordResetToken.create({
         data: {
           userId: user.id,
           tokenHash: this.tokens.hashToken(token),
           expiresAt,
           requestedIp: client.ipAddress,
         },
-      }),
-    ]);
+        select: { id: true },
+      });
+    });
 
-    // Delivery (SMS for phone-only users, otherwise email) is handled by a
-    // notifications processor in a later phase.
-    const job: PasswordResetJob = {
+    const { deliveryId } = await this.passwordResetDeliveries.create({
+      passwordResetTokenId: createdToken.id,
       userId: user.id,
-      channel: identifier.kind === 'email' && user.email ? 'email' : 'sms',
-      destination: identifier.kind === 'email' && user.email ? user.email : user.phoneNumber,
-      token,
-      expiresAt: expiresAt.toISOString(),
+      channel,
+      destination,
       language: user.preferredLanguage,
-    };
+      resetToken: token,
+      expiresAt,
+    });
+
+    const job: PasswordResetJob = { deliveryId };
     await this.notifications.add(PASSWORD_RESET_JOB, job, {
       removeOnComplete: true,
       removeOnFail: 100,

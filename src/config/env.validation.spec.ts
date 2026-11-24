@@ -5,12 +5,27 @@ describe('validateEnvironment', () => {
     DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
     JWT_ACCESS_SECRET: 'a'.repeat(32),
     JWT_REFRESH_SECRET: 'b'.repeat(32),
+    WEB_SESSION_HASH_SECRET: 'c'.repeat(32),
+    WEB_SESSION_ENCRYPTION_KEY: Buffer.from('d'.repeat(32)).toString('base64'),
+    MENYA_BFF_SHARED_SECRET: 'e'.repeat(32),
   };
 
   it('requires both JWT secrets', () => {
     expect(() => validateEnvironment({ DATABASE_URL: minimal.DATABASE_URL })).toThrow(
       /JWT_ACCESS_SECRET.*JWT_REFRESH_SECRET/,
     );
+  });
+
+  it('rejects a web-session secret reused from the JWT refresh secret', () => {
+    expect(() =>
+      validateEnvironment({ ...minimal, WEB_SESSION_HASH_SECRET: minimal.JWT_REFRESH_SECRET }),
+    ).toThrow(/WEB_SESSION_HASH_SECRET must be distinct/);
+  });
+
+  it('rejects a web-session encryption key that is not 32 bytes', () => {
+    expect(() =>
+      validateEnvironment({ ...minimal, WEB_SESSION_ENCRYPTION_KEY: Buffer.from('short').toString('base64') }),
+    ).toThrow(/WEB_SESSION_ENCRYPTION_KEY/);
   });
 
   it('rejects JWT secrets shorter than 32 characters', () => {

@@ -14,6 +14,7 @@ import {
 } from '../../generated/prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { revokeActiveWebSessions } from '../auth/services/web-session.revocation';
 import { NotificationEvent } from '../notifications/events/notification-events';
 import { NotificationPublisher } from '../notifications/publishing/notification-publisher.service';
 import { Permission, RoleCode } from '../roles/rbac.constants';
@@ -128,6 +129,7 @@ export class UsersService {
                 revokedReason: TokenRevocationReason.ACCOUNT_DISABLED,
               },
             }),
+            revokeActiveWebSessions(this.prisma, { userId: id }, TokenRevocationReason.ACCOUNT_DISABLED),
           ]
         : []),
     ]);

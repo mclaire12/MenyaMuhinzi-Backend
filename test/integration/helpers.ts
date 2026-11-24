@@ -18,6 +18,8 @@ import {
   AiOrchestratorService,
   type ExecutionOutcome,
 } from '../../src/modules/ai/orchestration/ai-orchestrator.service';
+import type { PasswordResetJob } from '../../src/modules/auth/auth.service';
+import { PasswordResetDeliveryStoreService } from '../../src/modules/auth/delivery/password-reset-delivery-store.service';
 import { PasswordHasher } from '../../src/modules/auth/services/password-hasher.service';
 import {
   NotificationDispatcher,
@@ -62,13 +64,25 @@ export async function createTestContext(
     on: jest.fn(),
     get: jest.fn(async (key: string) => redisStore.get(key) ?? null),
     set: jest.fn(async (key: string, value: string, ...args: unknown[]) => {
+      if (args.includes('NX') && redisStore.has(key)) return null;
       redisStore.set(key, value);
       const exIndex = args.indexOf('EX');
+      const pxIndex = args.indexOf('PX');
       if (exIndex >= 0 && typeof args[exIndex + 1] === 'number') {
         const ttlMs = (args[exIndex + 1] as number) * 1000;
         setTimeout(() => redisStore.delete(key), ttlMs).unref?.();
+      } else if (pxIndex >= 0 && typeof args[pxIndex + 1] === 'number') {
+        const ttlMs = args[pxIndex + 1] as number;
+        setTimeout(() => redisStore.delete(key), ttlMs).unref?.();
       }
       return 'OK';
+    }),
+    eval: jest.fn(async (_script: string, _numKeys: number, key: string, owner: string) => {
+      if (redisStore.get(key) === owner) {
+        redisStore.delete(key);
+        return 1;
+      }
+      return 0;
     }),
     del: jest.fn(async (key: string) => {
       redisStore.delete(key);
@@ -108,6 +122,15 @@ export async function createTestContext(
 }
 
 /** Empties every table except the seeded role and permission catalogue, then re-seeds grants. */
+export async function resetTokenFromJob(ctx: TestContext, job: PasswordResetJob): Promise<string> {
+  const store = ctx.app.get(PasswordResetDeliveryStoreService);
+  const resolved = await store.resolveForWorker(job.deliveryId);
+  if (!resolved) {
+    throw new Error(`Password reset delivery ${job.deliveryId} could not be resolved`);
+  }
+  return resolved.resetToken;
+}
+
 export async function resetDatabase(prisma: PrismaService): Promise<void> {
   const tables = await prisma.$queryRaw<{ tablename: string }[]>`
     SELECT tablename FROM pg_tables

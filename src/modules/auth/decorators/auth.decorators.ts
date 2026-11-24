@@ -14,6 +14,7 @@ import type { Request } from 'express';
 import { ErrorResponseDto } from '../../../common/dto/error-response.dto';
 import type { Permission, RoleCode } from '../../roles/rbac.constants';
 import type { AuthenticatedUser, ClientContext } from '../auth.types';
+import { BFF_PROTECTED_KEY } from '../web-session.constants';
 
 export const IS_PUBLIC_KEY = 'auth:isPublic';
 export const ROLES_KEY = 'auth:roles';
@@ -68,6 +69,10 @@ export const CurrentUser = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): AuthenticatedUser =>
     ctx.switchToHttp().getRequest<Request & { user: AuthenticatedUser }>().user,
 );
+
+/** Marks a route as callable only by the Vercel BFF (`BffGuard`). */
+export const BffProtected = (): MethodDecorator & ClassDecorator =>
+  SetMetadata(BFF_PROTECTED_KEY, true);
 
 export const Client = createParamDecorator((_data: unknown, ctx: ExecutionContext): ClientContext => {
   const req = ctx.switchToHttp().getRequest<Request>();

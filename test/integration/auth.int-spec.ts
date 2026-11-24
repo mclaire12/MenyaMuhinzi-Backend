@@ -5,6 +5,7 @@ import {
   UserStatus,
 } from '../../src/generated/prisma/client';
 import { PASSWORD_RESET_JOB } from '../../src/modules/auth/auth.service';
+import { PasswordResetDeliveryStoreService } from '../../src/modules/auth/delivery/password-reset-delivery-store.service';
 import { RoleCode } from '../../src/modules/roles/rbac.constants';
 import {
   API,
@@ -16,6 +17,7 @@ import {
   nextPhone,
   notificationsQueue,
   resetDatabase,
+  resetTokenFromJob,
   seedUser,
   type TestContext,
 } from './helpers';
@@ -579,22 +581,29 @@ describe('Authentication (integration)', () => {
       expect(queue.add).toHaveBeenCalledTimes(1);
       const [jobName, job] = queue.add.mock.calls[0];
       expect(jobName).toBe(PASSWORD_RESET_JOB);
-      expect(job).toMatchObject({
+      expect(job).toEqual({ deliveryId: expect.any(String) });
+      expect(job).not.toHaveProperty('token');
+      expect(job).not.toHaveProperty('destination');
+
+      const store = ctx.app.get(PasswordResetDeliveryStoreService);
+      const resolved = await store.resolveForWorker(job.deliveryId);
+      expect(resolved).toMatchObject({
         userId: user.id,
         channel: 'sms',
         destination: user.phoneNumber,
         language: 'rw',
       });
+      const resetToken = resolved!.resetToken;
 
       const stored = await ctx.prisma.passwordResetToken.findFirstOrThrow({
         where: { userId: user.id },
       });
-      expect(stored.tokenHash).not.toBe(job.token);
+      expect(stored.tokenHash).not.toBe(resetToken);
 
       await ctx
         .http()
         .post(`${API}/auth/reset-password`)
-        .send({ token: job.token, newPassword: 'Ibihingwa2027' })
+        .send({ token: resetToken, newPassword: 'Ibihingwa2027' })
         .expect(204);
 
       await ctx
@@ -607,7 +616,7 @@ describe('Authentication (integration)', () => {
       const reuse = await ctx
         .http()
         .post(`${API}/auth/reset-password`)
-        .send({ token: job.token, newPassword: 'Another2028' });
+        .send({ token: resetToken, newPassword: 'Another2028' });
       expect(reuse.status).toBe(400);
     });
 
@@ -624,12 +633,12 @@ describe('Authentication (integration)', () => {
         .send({ identifier: 'nopass@example.rw' })
         .expect(202);
       const [, job] = notificationsQueue(ctx).add.mock.calls[0];
-      expect(job).toMatchObject({ channel: 'email', destination: 'nopass@example.rw' });
+      const token = await resetTokenFromJob(ctx, job);
 
       await ctx
         .http()
         .post(`${API}/auth/reset-password`)
-        .send({ token: job.token, newPassword: 'Ibihingwa2027' })
+        .send({ token, newPassword: 'Ibihingwa2027' })
         .expect(204);
       await login(ctx, user.phoneNumber, 'Ibihingwa2027');
     });
@@ -642,6 +651,7 @@ describe('Authentication (integration)', () => {
         .send({ identifier: user.phoneNumber })
         .expect(202);
       const [, job] = notificationsQueue(ctx).add.mock.calls[0];
+      const token = await resetTokenFromJob(ctx, job);
       await ctx.prisma.passwordResetToken.updateMany({
         data: { expiresAt: new Date(Date.now() - 1000) },
       });
@@ -649,7 +659,7 @@ describe('Authentication (integration)', () => {
       await ctx
         .http()
         .post(`${API}/auth/reset-password`)
-        .send({ token: job.token, newPassword: 'Ibihingwa2027' })
+        .send({ token, newPassword: 'Ibihingwa2027' })
         .expect(400);
     });
 

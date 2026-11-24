@@ -7,6 +7,25 @@ import { appConfig, loggerConfig } from '../../config/configuration';
 
 export const REQUEST_ID_HEADER = 'x-request-id';
 
+/** Request fields removed from structured logs. Values are never written. */
+export const LOG_REDACT_PATHS = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["x-menya-web-session"]',
+  'req.headers["x-menya-bff-secret"]',
+  'req.headers["x-menya-access-token"]',
+  'res.headers["set-cookie"]',
+  'res.headers["x-menya-web-session"]',
+  'res.headers["x-menya-access-token"]',
+  'req.body.password',
+  'req.body.currentPassword',
+  'req.body.newPassword',
+  'req.body.refreshToken',
+  'req.body.accessToken',
+  'req.body.token',
+  'req.body.sessionId',
+];
+
 /**
  * Structured JSON logging (pino) with a request id propagated on every log line
  * and echoed back in the `x-request-id` response header.
@@ -29,7 +48,7 @@ export const REQUEST_ID_HEADER = 'x-request-id';
             return id;
           },
           redact: {
-            paths: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],
+            paths: LOG_REDACT_PATHS,
             censor: '[REDACTED]',
           },
           customLogLevel: (_req: IncomingMessage, res: ServerResponse, error?: Error) => {

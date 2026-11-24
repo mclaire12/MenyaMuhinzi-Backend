@@ -10,6 +10,7 @@ import {
   nextPhone,
   notificationsQueue,
   resetDatabase,
+  resetTokenFromJob,
   seedAndLogin,
   type LoginResult,
   type SeededUser,
@@ -227,11 +228,15 @@ describe('Account approval workflow (integration)', () => {
         .post(`${API}/auth/forgot-password`)
         .send({ identifier: created.body.applicant.phoneNumber })
         .expect(202);
-      const [, job] = notificationsQueue(ctx).add.mock.calls.at(-1) as [string, { token: string }];
+      const [, job] = notificationsQueue(ctx).add.mock.calls.at(-1) as [
+        string,
+        { deliveryId: string },
+      ];
+      const token = await resetTokenFromJob(ctx, job);
       await ctx
         .http()
         .post(`${API}/auth/reset-password`)
-        .send({ token: job.token, newPassword: 'Ibihingwa2027' })
+        .send({ token, newPassword: 'Ibihingwa2027' })
         .expect(204);
       await login(ctx, created.body.applicant.phoneNumber, 'Ibihingwa2027');
     });

@@ -4,9 +4,10 @@ import { ConfigType } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { parseDuration } from '../../../common/utils/duration';
 import { jwtConfig } from '../../../config/configuration';
-import { TokenRevocationReason, UserStatus } from '../../../generated/prisma/client';
+import { Prisma, TokenRevocationReason, UserStatus } from '../../../generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import type { RoleCode } from '../../roles/rbac.constants';
+import { revokeActiveWebSessions } from './web-session.revocation';
 import { accountStatusMessage } from '../account-status';
 import type { AccessTokenPayload, ClientContext } from '../auth.types';
 
@@ -26,6 +27,9 @@ export interface IssuedTokens {
   refreshToken: string;
   refreshTokenExpiresAt: Date;
 }
+
+/** Full rotation outcome for server-side session flows (not exposed in JSON APIs). */
+export type RotatedTokens = IssuedTokens & { userId: string; refreshTokenId: string };
 
 /**
  * Access tokens are short-lived JWTs. Refresh tokens are opaque random strings
@@ -67,33 +71,46 @@ export class TokenService {
       pv: passwordVersion(user.passwordChangedAt),
     };
     const accessToken = await this.jwt.signAsync(payload);
-
-    const refreshToken = this.generateOpaqueToken();
-    const refreshTokenExpiresAt = new Date(Date.now() + this.refreshTtlMs);
-    const record = await this.prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: this.hashToken(refreshToken),
-        familyId,
-        expiresAt: refreshTokenExpiresAt,
-        ipAddress: client.ipAddress,
-        userAgent: client.userAgent,
-      },
-      select: { id: true },
-    });
+    const stored = await this.createStoredRefreshToken(this.prisma, user.id, client, familyId);
 
     return {
       tokenType: 'Bearer',
       accessToken,
       expiresIn: this.accessTtlSeconds,
-      refreshToken,
-      refreshTokenExpiresAt,
-      refreshTokenId: record.id,
+      refreshToken: stored.refreshToken,
+      refreshTokenExpiresAt: stored.expiresAt,
+      refreshTokenId: stored.id,
     };
   }
 
+  /**
+   * Inserts a hashed refresh token. The plaintext is returned only to the caller,
+   * which must encrypt it before any web-session write and must not log it.
+   */
+  async createStoredRefreshToken(
+    db: Pick<Prisma.TransactionClient, 'refreshToken'>,
+    userId: string,
+    client: ClientContext,
+    familyId: string = randomUUID(),
+  ): Promise<{ id: string; refreshToken: string; familyId: string; expiresAt: Date }> {
+    const refreshToken = this.generateOpaqueToken();
+    const expiresAt = new Date(Date.now() + this.refreshTtlMs);
+    const record = await db.refreshToken.create({
+      data: {
+        userId,
+        tokenHash: this.hashToken(refreshToken),
+        familyId,
+        expiresAt,
+        ipAddress: client.ipAddress,
+        userAgent: client.userAgent,
+      },
+      select: { id: true },
+    });
+    return { id: record.id, refreshToken, familyId, expiresAt };
+  }
+
   /** Validates a refresh token, revokes it and issues a replacement in the same family. */
-  async rotate(refreshToken: string, client: ClientContext): Promise<IssuedTokens & { userId: string }> {
+  async rotate(refreshToken: string, client: ClientContext): Promise<RotatedTokens> {
     const stored = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: this.hashToken(refreshToken) },
       select: {
@@ -160,7 +177,7 @@ export class TokenService {
     });
 
     const { refreshTokenId: _id, ...tokens } = issued;
-    return { ...tokens, userId: user.id };
+    return { ...tokens, refreshTokenId: issued.refreshTokenId, userId: user.id };
   }
 
   /** Revokes the session the token belongs to. Returns false if it is not the user's token. */
@@ -175,16 +192,24 @@ export class TokenService {
   }
 
   async revokeAllForUser(userId: string, reason: TokenRevocationReason): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date(), revokedReason: reason },
-    });
+    const revokedAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt, revokedReason: reason },
+      }),
+      revokeActiveWebSessions(this.prisma, { userId }, reason),
+    ]);
   }
 
   private async revokeFamily(familyId: string, reason: TokenRevocationReason): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
-      where: { familyId, revokedAt: null },
-      data: { revokedAt: new Date(), revokedReason: reason },
-    });
+    const revokedAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.refreshToken.updateMany({
+        where: { familyId, revokedAt: null },
+        data: { revokedAt, revokedReason: reason },
+      }),
+      revokeActiveWebSessions(this.prisma, { familyId }, reason),
+    ]);
   }
 }

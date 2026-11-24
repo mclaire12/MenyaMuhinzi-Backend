@@ -10,11 +10,18 @@ import {
   Max,
   Min,
   MinLength,
+  ValidateBy,
   validateSync,
 } from 'class-validator';
 import { DURATION_PATTERN } from '../common/utils/duration';
 
 const DURATION_MESSAGE = '$property must be a duration such as 30s, 15m, 12h or 7d';
+
+function decodeAes256Key(value: unknown): Buffer | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const key = Buffer.from(value, 'base64');
+  return key.length === 32 ? key : undefined;
+}
 
 export enum NodeEnvironment {
   Development = 'development',
@@ -277,6 +284,103 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   IVR_CALLBACK_SECRET?: string;
+
+  /** HMAC-SHA256 key for opaque web-session ids. Must not equal JWT_REFRESH_SECRET. */
+  @IsString()
+  @MinLength(32)
+  WEB_SESSION_HASH_SECRET: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(32)
+  WEB_SESSION_HASH_SECRET_PREVIOUS?: string;
+
+  /** Base64-encoded 32-byte AES-256-GCM key for refresh tokens stored on web sessions. */
+  @ValidateBy({
+    name: 'isAes256Key',
+    validator: {
+      validate: (value: unknown) => decodeAes256Key(value) !== undefined,
+      defaultMessage: () => 'WEB_SESSION_ENCRYPTION_KEY must be a base64-encoded 32-byte key',
+    },
+  })
+  WEB_SESSION_ENCRYPTION_KEY: string;
+
+  @IsInt()
+  @Min(1)
+  WEB_SESSION_ENCRYPTION_KEY_VERSION: number = 1;
+
+  @Matches(DURATION_PATTERN, { message: DURATION_MESSAGE })
+  WEB_SESSION_IDLE_TTL: string = '30m';
+
+  @Matches(DURATION_PATTERN, { message: DURATION_MESSAGE })
+  WEB_SESSION_ABSOLUTE_TTL: string = '12h';
+
+  @IsInt()
+  @Min(100)
+  @Max(30_000)
+  WEB_SESSION_LOCK_TTL_MS: number = 5000;
+
+  /** Shared with the Vercel TanStack Start BFF only. */
+  @IsString()
+  @MinLength(32)
+  MENYA_BFF_SHARED_SECRET: string;
+
+  /** Public frontend origin used in password-reset links and Google OAuth redirects (no trailing slash). */
+  @IsOptional()
+  @IsString()
+  FRONTEND_SITE_ORIGIN?: string;
+
+  @IsOptional()
+  @IsString()
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
+
+  @Transform(toBoolean)
+  @IsOptional()
+  @IsBoolean()
+  PASSWORD_RESET_WORKER_ENABLED?: boolean;
+
+  @IsOptional()
+  @IsString()
+  SMTP_HOST?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  SMTP_PORT?: number;
+
+  @IsOptional()
+  @IsString()
+  SMTP_USER?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_PASSWORD?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_FROM?: string;
+
+  @Transform(toBoolean)
+  @IsOptional()
+  @IsBoolean()
+  SMTP_SECURE?: boolean;
+
+  @IsOptional()
+  @IsString()
+  TWILIO_ACCOUNT_SID?: string;
+
+  @IsOptional()
+  @IsString()
+  TWILIO_AUTH_TOKEN?: string;
+
+  @IsOptional()
+  @IsString()
+  TWILIO_FROM_NUMBER?: string;
 }
 
 /**
@@ -294,6 +398,24 @@ export function validateEnvironment(config: Record<string, unknown>): Environmen
       .map((error) => `${error.property}: ${Object.values(error.constraints ?? {}).join(', ')}`)
       .join('; ');
     throw new Error(`Invalid environment configuration: ${details}`);
+  }
+
+  if (validated.WEB_SESSION_HASH_SECRET === validated.JWT_REFRESH_SECRET) {
+    throw new Error('WEB_SESSION_HASH_SECRET must be distinct from JWT_REFRESH_SECRET');
+  }
+  if (
+    validated.WEB_SESSION_HASH_SECRET_PREVIOUS &&
+    validated.WEB_SESSION_HASH_SECRET_PREVIOUS === validated.WEB_SESSION_HASH_SECRET
+  ) {
+    throw new Error('WEB_SESSION_HASH_SECRET_PREVIOUS must be distinct from WEB_SESSION_HASH_SECRET');
+  }
+  const encryptionKey = decodeAes256Key(validated.WEB_SESSION_ENCRYPTION_KEY);
+  if (
+    !encryptionKey ||
+    validated.WEB_SESSION_ENCRYPTION_KEY === validated.JWT_REFRESH_SECRET ||
+    encryptionKey.toString('utf8') === validated.JWT_REFRESH_SECRET
+  ) {
+    throw new Error('WEB_SESSION_ENCRYPTION_KEY must be distinct from JWT_REFRESH_SECRET');
   }
 
   return validated;

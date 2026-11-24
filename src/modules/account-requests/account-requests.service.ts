@@ -4,10 +4,12 @@ import {
   AccountRequestStatus,
   ApprovalDecision,
   Prisma,
+  TokenRevocationReason,
   UserStatus,
 } from '../../generated/prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { revokeActiveWebSessions } from '../auth/services/web-session.revocation';
 import { farmerRoleFor } from '../farmers/farmers.service';
 import { NotificationEvent } from '../notifications/events/notification-events';
 import { NotificationPublisher } from '../notifications/publishing/notification-publisher.service';
@@ -171,6 +173,13 @@ export class AccountRequestsService {
           statusChangedById: actor.id,
         },
       });
+      if (!approved) {
+        await tx.refreshToken.updateMany({
+          where: { userId: request.userId, revokedAt: null },
+          data: { revokedAt: now, revokedReason: TokenRevocationReason.ACCOUNT_DISABLED },
+        });
+        await revokeActiveWebSessions(tx, { userId: request.userId }, TokenRevocationReason.ACCOUNT_DISABLED);
+      }
       return request.userId;
     });
   }

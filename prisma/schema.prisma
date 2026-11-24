@@ -174,8 +174,11 @@ model User {
   roles               UserRole[]           @relation("UserRoles")
   assignedRoles       UserRole[]           @relation("UserRoleAssignedBy")
   refreshTokens       RefreshToken[]
+  webSessions         WebSession[]
   loginAttempts       LoginAttempt[]
-  passwordResetTokens PasswordResetToken[]
+  passwordResetTokens     PasswordResetToken[]
+  passwordResetDeliveries PasswordResetDelivery[]
+  oauthIdentities         UserOAuthIdentity[]
   accountRequests     AccountRequest[]     @relation("AccountRequestApplicant")
   submittedRequests   AccountRequest[]     @relation("AccountRequestSubmittedBy")
   approvalDecisions   AccountApproval[]
@@ -316,12 +319,47 @@ model RefreshToken {
   ipAddress     String?                @db.VarChar(64)
   createdAt     DateTime               @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  webSession WebSession?
 
   @@index([userId])
   @@index([familyId])
   @@index([expiresAt])
   @@map("refresh_tokens")
+}
+
+/// Browser session for the Vercel BFF. The opaque id and refresh token are never stored in plaintext.
+model WebSession {
+  id                   String                 @id @default(uuid()) @db.Uuid
+  userId               String                 @db.Uuid
+  /// HMAC-SHA256 of the opaque session id.
+  sessionHash          String                 @unique @db.VarChar(64)
+  /// Same family as the encrypted refresh token.
+  familyId             String                 @db.Uuid
+  refreshTokenId       String                 @unique @db.Uuid
+  refreshCiphertext    Bytes
+  refreshNonce         Bytes
+  refreshAuthTag       Bytes
+  encryptionKeyVersion Int
+  /// Incremented when the opaque session id is rotated.
+  sessionVersion       Int                    @default(1)
+  /// `User.passwordChangedAt` captured at creation. A mismatch revokes the session.
+  passwordChangedAt    DateTime?
+  createdAt            DateTime               @default(now())
+  lastActivityAt       DateTime               @default(now())
+  idleExpiresAt        DateTime
+  absoluteExpiresAt    DateTime
+  revokedAt            DateTime?
+  revokedReason        TokenRevocationReason?
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken RefreshToken @relation(fields: [refreshTokenId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([idleExpiresAt])
+  @@index([absoluteExpiresAt])
+  @@map("web_sessions")
 }
 
 model LoginAttempt {
@@ -350,10 +388,60 @@ model PasswordResetToken {
   requestedIp String?   @db.VarChar(64)
   createdAt   DateTime  @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  delivery PasswordResetDelivery?
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+enum PasswordResetDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Short-lived encrypted reset token for outbound delivery only. Queue jobs reference `id`, never the raw token.
+model PasswordResetDelivery {
+  id                   String                      @id @default(uuid()) @db.Uuid
+  passwordResetTokenId String                      @unique @db.Uuid
+  userId               String                      @db.Uuid
+  channel              String                      @db.VarChar(8)
+  destination          String                      @db.VarChar(254)
+  language             Language                    @default(rw)
+  tokenCiphertext      Bytes?
+  tokenNonce           Bytes?
+  tokenAuthTag         Bytes?
+  encryptionKeyVersion Int?
+  status               PasswordResetDeliveryStatus @default(PENDING)
+  deliveredAt          DateTime?
+  expiresAt            DateTime
+  createdAt            DateTime                    @default(now())
+
+  passwordResetToken PasswordResetToken @relation(fields: [passwordResetTokenId], references: [id], onDelete: Cascade)
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([status])
+  @@map("password_reset_deliveries")
+}
+
+/// Federated sign-in identities (Google OpenID Connect subject). Never auto-link by email alone.
+model UserOAuthIdentity {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  provider  String   @db.VarChar(32)
+  subject   String   @db.VarChar(255)
+  email     String?  @db.VarChar(254)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+  @@index([userId])
+  @@map("user_oauth_identities")
 }
 
 // ---------------------------------------------------------------------------

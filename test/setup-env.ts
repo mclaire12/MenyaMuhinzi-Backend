@@ -16,6 +16,15 @@ process.env.REDIS_HOST ??= 'localhost';
 process.env.REDIS_PORT ??= '6379';
 process.env.JWT_ACCESS_SECRET = 'test-access-secret-0123456789abcdefghijklmnop';
 process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-0123456789abcdefghijklmnop';
+process.env.WEB_SESSION_HASH_SECRET = 'test-web-session-hash-secret-0123456789abcdef';
+process.env.WEB_SESSION_ENCRYPTION_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString(
+  'base64',
+);
+process.env.WEB_SESSION_ENCRYPTION_KEY_VERSION = '1';
+process.env.WEB_SESSION_IDLE_TTL = '30m';
+process.env.WEB_SESSION_ABSOLUTE_TTL = '12h';
+process.env.WEB_SESSION_LOCK_TTL_MS = '5000';
+process.env.MENYA_BFF_SHARED_SECRET = 'test-bff-shared-secret-0123456789abcdefghi';
 process.env.AUTH_FARMER_REQUIRES_APPROVAL = 'true';
 process.env.AUTH_EXPOSE_RESET_TOKEN = 'false';
 // High limits so suites are not throttled; throttling has a dedicated test.

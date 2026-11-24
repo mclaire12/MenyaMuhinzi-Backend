@@ -44,7 +44,7 @@ global filter (`P2002` → `409`, `P2025` → `404`).
 | `ai-generation`          | AI conversations service            | `AiRequestWorker` (Phase 5, `AI_WORKER_ENABLED`)                       |
 | `notification-delivery`  | Notification publisher              | `NotificationDeliveryWorker` (Phase 6, `NOTIFICATIONS_WORKER_ENABLED`) |
 | `media`                  | Not used yet                        | Later phases                                                           |
-| `notifications` (legacy) | `AuthService` (password-reset jobs) | None. See the note under Notifications                                 |
+| `notifications` (legacy) | `AuthService` (password-reset jobs) | `PasswordResetWorker` (delivery id only in job payload)              |
 
 Workers throw BullMQ `UnrecoverableError` for permanent failures (missing configuration, missing
 provider) so they are not retried. Only transient errors use the configured attempts.
@@ -237,10 +237,9 @@ its deliveries are flagged `isTestData = true`.
 
 ### Legacy `notifications` queue
 
-`AuthService` still adds `password-reset` jobs, which contain the reset token in plaintext, to the
-legacy `notifications` queue. Nothing consumes them. They predate Phase 6 and were left untouched
-so earlier behaviour is unchanged; they should be removed or redesigned (no token in the job)
-before any email or SMS password-reset delivery is built.
+`AuthService` enqueues `password-reset` jobs on the legacy `notifications` queue with a `deliveryId`
+reference only. The worker (`PasswordResetWorker`) resolves `password_reset_deliveries`, which
+hold the reset token encrypted at rest (AES-256-GCM) until SMTP/Twilio delivery succeeds.
 
 ## Reporting foundation (Phase 7)
 
