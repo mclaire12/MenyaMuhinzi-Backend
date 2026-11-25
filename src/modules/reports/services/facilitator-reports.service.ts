@@ -10,7 +10,12 @@ import {
 } from '../../../generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import type { AuthenticatedUser } from '../../auth/auth.types';
-import { parseDateRange, timestampFilter } from '../common/date-range';
+import {
+  countByUtcDay,
+  parseDateRange,
+  seriesFromCounts,
+  timestampFilter,
+} from '../common/date-range';
 import { ReportScopeService } from '../common/report-scope.service';
 import type { ReportFilterQueryDto } from '../dto/report-query.dto';
 
@@ -23,7 +28,8 @@ export class FacilitatorReportsService {
   ) {}
 
   async dashboard(actor: AuthenticatedUser, query: ReportFilterQueryDto) {
-    parseDateRange(query.startDate, query.endDate);
+    const range = parseDateRange(query.startDate, query.endDate);
+    const inRange = timestampFilter(range);
     const farmerIds = await this.scope.facilitatorFarmerIds(actor, query.groupId);
     const groups = await this.prisma.facilitatorGroup.findMany({
       where: {
@@ -38,7 +44,16 @@ export class FacilitatorReportsService {
       },
     });
 
-    const [enrollments, completed, attempts] = await Promise.all([
+    const [
+      enrollments,
+      completed,
+      attempts,
+      byType,
+      byDistrict,
+      completions,
+      activeLearners,
+      courses,
+    ] = await Promise.all([
       this.prisma.courseEnrollment.groupBy({
         by: ['status'],
         where: { userId: { in: farmerIds } },
@@ -53,6 +68,39 @@ export class FacilitatorReportsService {
       this.prisma.assessmentAttempt.groupBy({
         by: ['status'],
         where: { userId: { in: farmerIds } },
+        _count: { _all: true },
+      }),
+      this.prisma.farmerProfile.groupBy({
+        by: ['farmerType'],
+        where: { userId: { in: farmerIds }, user: { deletedAt: null } },
+        _count: { _all: true },
+      }),
+      this.prisma.userLocation.groupBy({
+        by: ['district'],
+        where: { userId: { in: farmerIds }, user: { deletedAt: null } },
+        _count: { _all: true },
+      }),
+      // Completed lessons inside the selected range (all time when no range is given).
+      this.prisma.lessonProgress.findMany({
+        where: {
+          userId: { in: farmerIds },
+          status: LessonProgressStatus.COMPLETED,
+          completedAt: inRange ?? { not: null },
+        },
+        select: { completedAt: true },
+      }),
+      // Farmers who opened a lesson inside the range.
+      this.prisma.lessonProgress.findMany({
+        where: {
+          userId: { in: farmerIds },
+          lastAccessedAt: inRange ?? { not: null },
+        },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
+      this.prisma.course.groupBy({
+        by: ['status'],
+        where: { createdById: actor.id },
         _count: { _all: true },
       }),
     ]);
@@ -74,6 +122,14 @@ export class FacilitatorReportsService {
         key: row.status,
         count: row._count._all,
       })),
+      farmersByType: byType.map((row) => ({ key: row.farmerType, count: row._count._all })),
+      farmersByDistrict: byDistrict.map((row) => ({ key: row.district, count: row._count._all })),
+      completedLessonsInRange: completions.length,
+      completionsOverTime: seriesFromCounts(
+        countByUtcDay(completions.flatMap((row) => (row.completedAt ? [row.completedAt] : []))),
+      ),
+      activeLearnersInRange: activeLearners.length,
+      coursesByStatus: courses.map((row) => ({ key: row.status, count: row._count._all })),
     };
   }
 

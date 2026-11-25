@@ -32,6 +32,13 @@ export class UserResponseDto {
   @ApiProperty({ enum: ALL_ROLE_CODES, isArray: true, example: ['SMARTPHONE_FARMER'] })
   roles: RoleCode[];
 
+  @ApiPropertyOptional({
+    nullable: true,
+    type: Date,
+    description: 'When the personal email was verified; null until the verification link is used',
+  })
+  emailVerifiedAt: Date | null;
+
   @ApiPropertyOptional({ nullable: true, type: Date })
   lastLoginAt: Date | null;
 
@@ -82,6 +89,11 @@ export class UserDetailResponseDto extends UserResponseDto {
 
   @ApiPropertyOptional({ type: FacilitatorProfileSummaryDto, nullable: true })
   facilitatorProfile: FacilitatorProfileSummaryDto | null;
+
+  @ApiPropertyOptional({
+    description: 'Only on create: true when the SMTP server accepted the verification email.',
+  })
+  emailSent?: boolean;
 }
 
 export class CurrentUserResponseDto extends UserDetailResponseDto {
@@ -90,8 +102,8 @@ export class CurrentUserResponseDto extends UserDetailResponseDto {
 }
 
 export class UserListResponseDto {
-  @ApiProperty({ type: UserResponseDto, isArray: true })
-  data: UserResponseDto[];
+  @ApiProperty({ type: UserDetailResponseDto, isArray: true })
+  data: UserDetailResponseDto[];
 
   @ApiProperty({ type: PaginationMetaDto })
   meta: PaginationMetaDto;

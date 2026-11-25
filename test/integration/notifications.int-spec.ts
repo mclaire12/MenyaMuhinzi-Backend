@@ -202,11 +202,14 @@ describe('Notifications foundation without a provider (integration)', () => {
         .http()
         .post(`${API}/auth/register`)
         .send({
-          accountType: RoleCode.SmartphoneFarmer,
+          // Facilitators are the self-registered accounts that go through approval.
+          accountType: RoleCode.Facilitator,
           fullName: 'Uwimana Jeanne',
           phoneNumber: localFormat(nextPhone()),
+          email: 'jeanne.approval@example.rw',
           password: DEFAULT_PASSWORD,
-          location: { province: 'NORTHERN', district: 'Musanze', sector: 'Muhoza' },
+          location: { province: 'NORTHERN', district: 'Musanze' },
+          facilitator: { professionalTitle: 'Agronomist', organization: 'Rwanda Agriculture Board' },
         })
         .expect(201);
       await post(

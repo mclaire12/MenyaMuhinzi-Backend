@@ -32,6 +32,7 @@ import {
   userDetailSelect,
   userSummarySelect,
 } from './user.mapper';
+import { EmailVerificationService } from './email-verification.service';
 import { UserProvisioningService } from './user-provisioning.service';
 import { assertCompatibleRoles, assertStatusTransition } from './user-status.policy';
 
@@ -41,20 +42,22 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly provisioning: UserProvisioningService,
     private readonly notifications: NotificationPublisher,
+    private readonly emailVerification: EmailVerificationService,
   ) {}
 
-  async list(query: ListUsersQueryDto): Promise<Paginated<UserResponseDto>> {
+  /** Includes location and role profiles so the admin people table needs no extra calls. */
+  async list(query: ListUsersQueryDto): Promise<Paginated<UserDetailResponseDto>> {
     const where = this.buildWhere(query);
     const [users, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
-        select: userSummarySelect,
+        select: userDetailSelect,
         orderBy: { createdAt: query.sort },
         ...paginationArgs(query),
       }),
       this.prisma.user.count({ where }),
     ]);
-    return paginated(users.map(toUserResponse), total, query);
+    return paginated(users.map(toUserDetailResponse), total, query);
   }
 
   async findOne(id: string): Promise<UserDetailResponseDto> {
@@ -76,24 +79,34 @@ export class UsersService {
       status: UserStatus.ACTIVE,
       createdById: actor.id,
     });
-    return this.findOne(userId);
+    // Staff-created accounts still prove ownership of the personal email before signing in.
+    const { emailSent } = await this.emailVerification.issue(userId, 'staff-created');
+    return { ...(await this.findOne(userId)), emailSent };
   }
 
   async update(id: string, dto: UpdateUserDto): Promise<UserDetailResponseDto> {
     await this.assertExists(id);
+    const current = await this.prisma.user.findUniqueOrThrow({
+      where: { id },
+      select: { email: true },
+    });
+    const emailChanged = dto.email !== undefined && dto.email !== current.email;
     try {
       await this.prisma.user.update({
         where: { id },
         data: {
           fullName: dto.fullName,
           phoneNumber: dto.phoneNumber,
-          email: dto.email === undefined ? undefined : dto.email,
+          email: dto.email,
           preferredLanguage: dto.preferredLanguage,
+          // A new address must be proven again before the account can sign in.
+          ...(emailChanged ? { emailVerifiedAt: null } : {}),
         },
       });
     } catch (error) {
       throw this.mapUniqueViolation(error);
     }
+    if (emailChanged) await this.emailVerification.issue(id, 'staff-created');
     return this.findOne(id);
   }
 

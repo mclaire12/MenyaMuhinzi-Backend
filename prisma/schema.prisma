@@ -161,6 +161,7 @@ model User {
   lockedUntil         DateTime?
   lastLoginAt         DateTime?
   passwordChangedAt   DateTime?
+  emailVerifiedAt     DateTime?
   createdById         String?    @db.Uuid
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
@@ -178,6 +179,7 @@ model User {
   loginAttempts       LoginAttempt[]
   passwordResetTokens     PasswordResetToken[]
   passwordResetDeliveries PasswordResetDelivery[]
+  emailVerificationTokens EmailVerificationToken[]
   oauthIdentities         UserOAuthIdentity[]
   accountRequests     AccountRequest[]     @relation("AccountRequestApplicant")
   submittedRequests   AccountRequest[]     @relation("AccountRequestSubmittedBy")
@@ -393,6 +395,25 @@ model PasswordResetToken {
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique @db.VarChar(128)
+  /// SHA-256 of the 6-digit code bound to this token; never stored in plain text.
+  otpHash   String?   @db.VarChar(128)
+  /// Wrong codes entered for this token; the token is retired after the limit.
+  failedAttempts Int  @default(0)
+  email     String    @db.VarChar(254)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_verification_tokens")
 }
 
 enum PasswordResetDeliveryStatus {

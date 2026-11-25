@@ -187,6 +187,16 @@ describe('User management (integration)', () => {
 
       expect(res.status).toBe(201);
       expect(res.body).toMatchObject({ status: UserStatus.ACTIVE, roles: [RoleCode.Admin] });
+      await ctx
+        .http()
+        .post(`${API}/auth/login`)
+        .send({ identifier: 'second@menyamuhinzi.rw', password: DEFAULT_PASSWORD })
+        .expect(403);
+      await ctx
+        .http()
+        .post(`${API}/auth/verify-email`)
+        .send(ctx.mail.latestVerification(res.body.id))
+        .expect(204);
       await login(ctx, 'second@menyamuhinzi.rw');
     });
 
@@ -198,6 +208,7 @@ describe('User management (integration)', () => {
         .send({
           fullName: 'Both',
           phoneNumber: nextPhone(),
+          email: 'both@example.rw',
           roles: [RoleCode.SmartphoneFarmer, RoleCode.BasicPhoneFarmer],
         })
         .expect(400);
@@ -206,30 +217,53 @@ describe('User management (integration)', () => {
         .http()
         .post(`${API}/users`)
         .set(...bearer(admin.accessToken))
-        .send({ fullName: 'Dup', phoneNumber: admin.phoneNumber, roles: [RoleCode.Facilitator] })
+        .send({
+          fullName: 'Dup',
+          phoneNumber: admin.phoneNumber,
+          email: 'dup@example.rw',
+          roles: [RoleCode.Facilitator],
+        })
         .expect(409);
+      await ctx
+        .http()
+        .post(`${API}/users`)
+        .set(...bearer(admin.accessToken))
+        .send({ fullName: 'No Email', phoneNumber: nextPhone(), roles: [RoleCode.Facilitator] })
+        .expect(400);
     });
   });
 
   describe('PATCH /users/:id', () => {
-    it('updates details and can remove the email', async () => {
+    it('updates details, refuses to remove the email and re-verifies a changed email', async () => {
       const user = await seedUser(ctx.prisma, {
         roles: [RoleCode.Facilitator],
         email: 'old@example.rw',
       });
 
+      await ctx
+        .http()
+        .patch(`${API}/users/${user.id}`)
+        .set(...bearer(admin.accessToken))
+        .send({ email: null })
+        .expect(400);
+
       const res = await ctx
         .http()
         .patch(`${API}/users/${user.id}`)
         .set(...bearer(admin.accessToken))
-        .send({ fullName: 'Renamed User', preferredLanguage: 'en', email: null });
+        .send({ fullName: 'Renamed User', preferredLanguage: 'en', email: 'New@Example.rw' });
 
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({
         fullName: 'Renamed User',
         preferredLanguage: 'en',
-        email: null,
+        email: 'new@example.rw',
       });
+      const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+      expect(stored.emailVerifiedAt).toBeNull();
+      expect(ctx.mail.verificationsFor(user.id)).toEqual([
+        expect.objectContaining({ to: 'new@example.rw' }),
+      ]);
     });
 
     it('rejects a phone number that belongs to someone else', async () => {

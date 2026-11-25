@@ -8,6 +8,9 @@ const MESSAGES: Record<UserStatus, string> = {
   REJECTED: 'Your account request was rejected',
 };
 
+/** Shown when an otherwise eligible account has not yet verified its personal email. */
+export const EMAIL_NOT_VERIFIED = 'Email verification is required before login';
+
 export function accountStatusMessage(status: UserStatus): string {
   return MESSAGES[status];
 }

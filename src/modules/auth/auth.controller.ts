@@ -30,7 +30,9 @@ import {
   LogoutDto,
   RefreshTokenDto,
   RegisterDto,
+  ResendVerificationDto,
   ResetPasswordDto,
+  VerifyEmailDto,
 } from './dto/auth-request.dto';
 import {
   AuthTokensResponseDto,
@@ -50,9 +52,10 @@ export class AuthController {
   @ApiOperation({
     summary: 'Self-register as a smartphone farmer or facilitator',
     description:
-      'Facilitator accounts always require administrator approval. Smartphone farmers require ' +
-      'approval when AUTH_FARMER_REQUIRES_APPROVAL=true (default). Pending accounts cannot sign in. ' +
-      'A previously rejected applicant may register again with the same phone number. **Public.**',
+      'A personal email is required. Smartphone farmers receive an email verification link ' +
+      'immediately and can sign in once verified (no administrator approval). Facilitator ' +
+      'accounts require administrator approval first; the verification link is sent only after ' +
+      'approval. A previously rejected applicant may register again with the same phone number. **Public.**',
   })
   @ApiCreatedResponse({ type: RegistrationResponseDto })
   @ApiConflictResponse({
@@ -63,12 +66,42 @@ export class AuthController {
     return this.auth.register(dto);
   }
 
+  @Post('verify-email')
+  @Public()
+  @AuthRateLimit()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Verify an email with the link token and the 6-digit code from the same email',
+    description:
+      'Tokens expire after 24 hours and can be used once. After 5 wrong codes the link is retired and a new email must be requested. **Public.**',
+  })
+  @ApiNoContentResponse({ description: 'Email verified' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Wrong code, or invalid, expired or used link' })
+  verifyEmail(@Body() dto: VerifyEmailDto): Promise<void> {
+    return this.auth.verifyEmail(dto.token, dto.code);
+  }
+
+  @Post('resend-verification')
+  @Public()
+  @AuthRateLimit()
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Send a new email verification link',
+    description:
+      'Always returns 202 so account existence is not revealed. Only active, unverified accounts ' +
+      'receive a link, at most once per minute. **Public.**',
+  })
+  @ApiAcceptedResponse({ description: 'Generic verification response' })
+  resendVerification(@Body() dto: ResendVerificationDto): Promise<{ message: string }> {
+    return this.auth.resendEmailVerification(dto.identifier);
+  }
+
   @Post('login')
   @Public()
   @AuthRateLimit()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Sign in with email and password',
+    summary: 'Sign in with email or phone number and password',
     description:
       'Returns a short-lived access token and a single-use refresh token. After ' +
       'AUTH_MAX_FAILED_LOGINS consecutive wrong passwords the account is locked for ' +

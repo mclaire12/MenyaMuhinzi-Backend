@@ -11,7 +11,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { FarmerLocationDto, LocationResponseDto } from '../../../common/dto/location.dto';
+import { FarmerAddressDto, LocationResponseDto } from '../../../common/dto/location.dto';
 import { PaginationMetaDto, PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import {
   IsNormalizedEmail,
@@ -40,10 +40,9 @@ export class FarmerRegistrationFieldsDto {
   @IsRwandanPhone()
   phoneNumber: string;
 
-  @ApiPropertyOptional({ example: 'habimana@example.rw', description: 'Optional for every farmer' })
-  @IsOptional()
+  @ApiProperty({ example: 'habimana@example.rw', description: 'Mandatory personal email for every farmer' })
   @IsNormalizedEmail()
-  email?: string;
+  email: string;
 
   @ApiProperty({ enum: FarmerType, example: FarmerType.BASIC_PHONE })
   @IsEnum(FarmerType)
@@ -59,11 +58,11 @@ export class FarmerRegistrationFieldsDto {
   @IsEnum(Language)
   preferredLanguage?: Language;
 
-  @ApiProperty({ type: FarmerLocationDto })
+  @ApiProperty({ type: FarmerAddressDto })
   @IsNotEmptyObject()
   @ValidateNested()
-  @Type(() => FarmerLocationDto)
-  location: FarmerLocationDto;
+  @Type(() => FarmerAddressDto)
+  location: FarmerAddressDto;
 }
 
 export class CreateFarmerDto extends FarmerRegistrationFieldsDto {
@@ -105,12 +104,12 @@ export class UpdateFarmerDto {
   @IsEnum(FarmerCategory)
   farmerCategory?: FarmerCategory;
 
-  @ApiPropertyOptional({ type: FarmerLocationDto, description: 'Replaces the whole location' })
+  @ApiPropertyOptional({ type: FarmerAddressDto, description: 'Replaces the whole location' })
   @IsOptional()
   @IsNotEmptyObject()
   @ValidateNested()
-  @Type(() => FarmerLocationDto)
-  location?: FarmerLocationDto;
+  @Type(() => FarmerAddressDto)
+  location?: FarmerAddressDto;
 }
 
 export class ListFarmersQueryDto extends PaginationQueryDto {
@@ -191,6 +190,12 @@ export class FarmerResponseDto {
 
   @ApiProperty()
   updatedAt: Date;
+
+  @ApiPropertyOptional({
+    description:
+      'Only on create: true when the SMTP server accepted the verification email for this farmer.',
+  })
+  emailSent?: boolean;
 }
 
 export class FarmerListResponseDto {

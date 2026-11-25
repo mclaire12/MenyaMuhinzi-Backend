@@ -13,7 +13,9 @@ import { revokeActiveWebSessions } from '../auth/services/web-session.revocation
 import { farmerRoleFor } from '../farmers/farmers.service';
 import { NotificationEvent } from '../notifications/events/notification-events';
 import { NotificationPublisher } from '../notifications/publishing/notification-publisher.service';
-import type { RoleCode } from '../roles/rbac.constants';
+import { RoleCode } from '../roles/rbac.constants';
+import { AccountEmailService } from '../users/account-email.service';
+import { EmailVerificationService } from '../users/email-verification.service';
 import { toUserDetailResponse, userDetailSelect } from '../users/user.mapper';
 import { UserProvisioningService } from '../users/user-provisioning.service';
 import { searchConditions } from '../users/users.service';
@@ -51,6 +53,8 @@ export class AccountRequestsService {
     private readonly prisma: PrismaService,
     private readonly provisioning: UserProvisioningService,
     private readonly notifications: NotificationPublisher,
+    private readonly emailVerification: EmailVerificationService,
+    private readonly accountEmail: AccountEmailService,
   ) {}
 
   /** A facilitator or admin registers a farmer who then awaits approval. */
@@ -106,7 +110,17 @@ export class AccountRequestsService {
     dto: ApproveAccountRequestDto,
     actor: AuthenticatedUser,
   ): Promise<AccountRequestResponseDto> {
-    const applicantId = await this.decide(id, actor, ApprovalDecision.APPROVED, dto.note ?? null);
+    const { userId: applicantId, role } = await this.decide(
+      id,
+      actor,
+      ApprovalDecision.APPROVED,
+      dto.note ?? null,
+    );
+    // Approval alone does not allow sign-in: the applicant must still verify the personal email.
+    const { emailSent } = await this.emailVerification.issue(
+      applicantId,
+      role === RoleCode.Facilitator ? 'approval' : 'staff-created',
+    );
     await this.notifications.notifyEvent(
       NotificationEvent.AccountApproved,
       applicantId,
@@ -116,7 +130,7 @@ export class AccountRequestsService {
         dedupeKey: `account-request:${id}:decision`,
       },
     );
-    return this.findOne(id);
+    return { ...(await this.findOne(id)), emailSent };
   }
 
   async reject(
@@ -124,14 +138,32 @@ export class AccountRequestsService {
     dto: RejectAccountRequestDto,
     actor: AuthenticatedUser,
   ): Promise<AccountRequestResponseDto> {
-    const applicantId = await this.decide(id, actor, ApprovalDecision.REJECTED, dto.reason);
+    const { userId: applicantId } = await this.decide(
+      id,
+      actor,
+      ApprovalDecision.REJECTED,
+      dto.reason,
+    );
     await this.notifications.notifyEvent(
       NotificationEvent.AccountRejected,
       applicantId,
       { reason: dto.reason.length > 250 ? `${dto.reason.slice(0, 249)}…` : dto.reason },
       { entity: { type: 'account-request', id }, dedupeKey: `account-request:${id}:decision` },
     );
-    return this.findOne(id);
+    // Rejected applicants get the outcome by email; no verification link is issued.
+    const applicant = await this.prisma.user.findUnique({
+      where: { id: applicantId },
+      select: { email: true, preferredLanguage: true },
+    });
+    const outcome = applicant?.email
+      ? await this.accountEmail.sendRejection({
+          userId: applicantId,
+          to: applicant.email,
+          language: applicant.preferredLanguage,
+          reason: dto.reason,
+        })
+      : { delivered: false };
+    return { ...(await this.findOne(id)), emailSent: outcome.delivered };
   }
 
   private async decide(
@@ -139,14 +171,14 @@ export class AccountRequestsService {
     actor: AuthenticatedUser,
     decision: ApprovalDecision,
     reason: string | null,
-  ): Promise<string> {
+  ): Promise<{ userId: string; role: RoleCode }> {
     const approved = decision === ApprovalDecision.APPROVED;
     const now = new Date();
 
     return this.prisma.$transaction(async (tx) => {
       const request = await tx.accountRequest.findUnique({
         where: { id },
-        select: { status: true, userId: true },
+        select: { status: true, userId: true, requestedRole: { select: { code: true } } },
       });
       if (!request) throw new NotFoundException('Account request not found');
 
@@ -180,7 +212,7 @@ export class AccountRequestsService {
         });
         await revokeActiveWebSessions(tx, { userId: request.userId }, TokenRevocationReason.ACCOUNT_DISABLED);
       }
-      return request.userId;
+      return { userId: request.userId, role: request.requestedRole.code as RoleCode };
     });
   }
 }

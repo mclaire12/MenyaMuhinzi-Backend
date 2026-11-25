@@ -14,7 +14,7 @@ import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import { RoleCode } from '../../roles/rbac.constants';
 import { UserProvisioningService } from '../../users/user-provisioning.service';
 import { userSummarySelect, toUserResponse } from '../../users/user.mapper';
-import { accountStatusMessage } from '../account-status';
+import { accountStatusMessage, EMAIL_NOT_VERIFIED } from '../account-status';
 import type { ClientContext } from '../auth.types';
 import type { GoogleOAuthCompleteDto } from '../dto/google-oauth.dto';
 import type { WebSessionCreatedResponseDto } from '../dto/web-session.dto';
@@ -74,7 +74,7 @@ export class GoogleWebSessionAuthService {
 
     const profile = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
-      select: { ...userSummarySelect, passwordChangedAt: true },
+      select: { ...userSummarySelect, passwordChangedAt: true, emailVerifiedAt: true },
     });
     if (!profile) throw new UnauthorizedException(UNLINKED_GOOGLE);
 
@@ -88,6 +88,9 @@ export class GoogleWebSessionAuthService {
 
     if (profile.status !== UserStatus.ACTIVE) {
       throw new ForbiddenException(accountStatusMessage(profile.status));
+    }
+    if (!profile.emailVerifiedAt) {
+      throw new ForbiddenException(EMAIL_NOT_VERIFIED);
     }
 
     await this.prisma.user.update({
@@ -148,7 +151,7 @@ export class GoogleWebSessionAuthService {
     }
 
     const isFacilitator = accountType === RoleCode.Facilitator;
-    const requiresApproval = isFacilitator || this.config.farmerRequiresApproval;
+    const requiresApproval = isFacilitator;
     const fullName = (context.fullName ?? identity.fullName ?? email.split('@')[0]!).slice(0, 150);
     const preferredLanguage = (context.preferredLanguage as Language | undefined) ?? Language.rw;
 
@@ -159,6 +162,7 @@ export class GoogleWebSessionAuthService {
       preferredLanguage,
       roles: [accountType],
       status: requiresApproval ? UserStatus.PENDING : UserStatus.ACTIVE,
+      emailVerifiedAt: requiresApproval ? undefined : new Date(),
       farmer: isFacilitator
         ? undefined
         : { farmerType: FarmerType.SMARTPHONE },

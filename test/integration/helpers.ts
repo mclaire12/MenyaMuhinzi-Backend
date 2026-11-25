@@ -27,6 +27,104 @@ import {
 } from '../../src/modules/notifications/delivery/notification-dispatcher.service';
 import { KnowledgePipelineService } from '../../src/modules/knowledge/pipeline/knowledge-pipeline.service';
 import type { RoleCode } from '../../src/modules/roles/rbac.constants';
+import {
+  AccountEmailService,
+  type AccountEmailOutcome,
+  type VerificationEmailContext,
+} from '../../src/modules/users/account-email.service';
+
+export interface SentAccountEmail {
+  kind: 'verification' | 'rejection';
+  userId: string;
+  to: string;
+  /** Plaintext token from the link, as only the recipient would see it. */
+  token?: string;
+  /** 6-digit code printed in the same email. */
+  code?: string;
+  context?: VerificationEmailContext;
+  reason?: string;
+}
+
+/**
+ * Stands in for SMTP: records account emails instead of sending them. Set `failNext`
+ * to simulate an SMTP failure for the next message.
+ */
+export class MailOutbox {
+  sent: SentAccountEmail[] = [];
+  failNext = false;
+
+  clear(): void {
+    this.sent = [];
+    this.failNext = false;
+  }
+
+  verificationsFor(userId: string): SentAccountEmail[] {
+    return this.sent.filter((mail) => mail.kind === 'verification' && mail.userId === userId);
+  }
+
+  /** Token from the most recent verification email sent to the user. */
+  latestToken(userId: string): string {
+    const token = this.verificationsFor(userId).at(-1)?.token;
+    if (!token) throw new Error(`No verification email was sent to user ${userId}`);
+    return token;
+  }
+
+  /** Link token and code from the user's most recent verification email (the verify-email body). */
+  latestVerification(userId: string): { token: string; code: string } {
+    const mail = this.verificationsFor(userId).at(-1);
+    if (!mail?.token || !mail.code) {
+      throw new Error(`No verification email was sent to user ${userId}`);
+    }
+    return { token: mail.token, code: mail.code };
+  }
+
+  private outcome(): AccountEmailOutcome {
+    if (this.failNext) {
+      this.failNext = false;
+      return { delivered: false, reason: 'SEND_FAILED' };
+    }
+    return { delivered: true };
+  }
+
+  readonly service = {
+    sendVerification: async (params: {
+      userId: string;
+      to: string;
+      token: string;
+      code: string;
+      context: VerificationEmailContext;
+    }): Promise<AccountEmailOutcome> => {
+      const outcome = this.outcome();
+      if (outcome.delivered) {
+        this.sent.push({
+          kind: 'verification',
+          userId: params.userId,
+          to: params.to,
+          token: params.token,
+          code: params.code,
+          context: params.context,
+        });
+      }
+      return outcome;
+    },
+    sendRejection: async (params: {
+      userId: string;
+      to: string;
+      reason: string;
+    }): Promise<AccountEmailOutcome> => {
+      const outcome = this.outcome();
+      if (outcome.delivered) {
+        this.sent.push({
+          kind: 'rejection',
+          userId: params.userId,
+          to: params.to,
+          reason: params.reason,
+        });
+      }
+      return outcome;
+    },
+  };
+}
 
 export const API = '/api/v1';
 export const DEFAULT_PASSWORD = 'Umuhinzi2026';
@@ -40,6 +138,8 @@ export interface FakeQueue {
 
 export interface TestContext {
   app: NestExpressApplication;
+  /** Account emails (verification, rejection) captured instead of being sent over SMTP. */
+  mail: MailOutbox;
   prisma: PrismaService;
   queues: Record<string, FakeQueue>;
   http: () => ReturnType<typeof request>;
@@ -103,6 +203,8 @@ export async function createTestContext(
     };
     builder = builder.overrideProvider(getQueueToken(name)).useValue(queues[name]);
   }
+  const mail = new MailOutbox();
+  builder = builder.overrideProvider(AccountEmailService).useValue(mail.service);
   for (const override of options.overrides ?? []) {
     builder = builder.overrideProvider(override.token).useValue(override.value);
   }
@@ -114,6 +216,7 @@ export async function createTestContext(
 
   return {
     app,
+    mail,
     prisma: app.get(PrismaService),
     queues,
     http: () => request(app.getHttpServer()),
@@ -287,6 +390,8 @@ export interface SeedUserOptions {
   phoneNumber?: string;
   email?: string;
   fullName?: string;
+  /** Seeded accounts with an email count as verified unless this is false. */
+  emailVerified?: boolean;
 }
 
 export interface SeededUser {
@@ -317,6 +422,7 @@ export async function seedUser(
       fullName: options.fullName ?? 'Test User',
       phoneNumber,
       email: options.email,
+      emailVerifiedAt: options.email && options.emailVerified !== false ? new Date() : null,
       passwordHash,
       status: options.status ?? UserStatus.ACTIVE,
       roles: { create: roles.map((role) => ({ roleId: role.id })) },
@@ -358,7 +464,10 @@ async function emailForPhone(ctx: TestContext, phone: string): Promise<string> {
   if (!user) throw new Error(`No user with phone number ${phoneNumber}`);
   if (user.email) return user.email;
   const email = `${phoneNumber.replace('+', '')}@test.menyamuhinzi.rw`;
-  await ctx.prisma.user.update({ where: { id: user.id }, data: { email } });
+  await ctx.prisma.user.update({
+    where: { id: user.id },
+    data: { email, emailVerifiedAt: new Date() },
+  });
   return email;
 }
 

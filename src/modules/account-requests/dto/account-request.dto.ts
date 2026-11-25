@@ -116,6 +116,12 @@ export class AccountRequestResponseDto {
 
   @ApiProperty()
   updatedAt: Date;
+
+  @ApiPropertyOptional({
+    description:
+      'Only on approve/reject: whether the SMTP server accepted the verification (approve) or rejection email',
+  })
+  emailSent?: boolean;
 }
 
 export class AccountRequestListResponseDto {

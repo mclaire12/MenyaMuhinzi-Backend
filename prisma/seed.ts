@@ -60,6 +60,8 @@ async function main(): Promise<void> {
         passwordChangedAt: new Date(),
         status: UserStatus.ACTIVE,
         statusChangedAt: new Date(),
+        // The seeded administrator is trusted configuration, so its email counts as verified.
+        emailVerifiedAt: email ? new Date() : null,
         roles: { create: { roleId: adminRole.id } },
       },
     });

@@ -190,6 +190,11 @@ export class FacilitatorResponseDto {
 
   @ApiProperty()
   updatedAt: Date;
+
+  @ApiPropertyOptional({
+    description: 'Only on create: true when the SMTP server accepted the verification email.',
+  })
+  emailSent?: boolean;
 }
 
 export class FacilitatorListResponseDto {

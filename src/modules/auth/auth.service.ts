@@ -32,8 +32,9 @@ import {
   userDetailSelect,
   userSummarySelect,
 } from '../users/user.mapper';
+import { EmailVerificationService } from '../users/email-verification.service';
 import { UserProvisioningService } from '../users/user-provisioning.service';
-import { accountStatusMessage } from './account-status';
+import { accountStatusMessage, EMAIL_NOT_VERIFIED } from './account-status';
 import type { AuthenticatedUser, ClientContext } from './auth.types';
 import type {
   ChangePasswordDto,
@@ -74,13 +75,14 @@ export class AuthService {
     private readonly provisioning: UserProvisioningService,
     private readonly publisher: NotificationPublisher,
     private readonly passwordResetDeliveries: PasswordResetDeliveryStoreService,
+    private readonly emailVerification: EmailVerificationService,
     @Inject(authConfig.KEY) private readonly config: ConfigType<typeof authConfig>,
     @InjectQueue(QueueName.Notifications) private readonly notifications: Queue,
   ) {}
 
   async register(dto: RegisterDto): Promise<RegistrationResponseDto> {
     const isFacilitator = dto.accountType === RoleCode.Facilitator;
-    const requiresApproval = isFacilitator || this.config.farmerRequiresApproval;
+    const requiresApproval = isFacilitator;
 
     const { userId, accountRequestId } = await this.provisioning.provision({
       fullName: dto.fullName,
@@ -102,13 +104,21 @@ export class AuthService {
       where: { id: userId },
       select: userSummarySelect,
     });
+    // Smartphone farmers verify their email straight away; facilitators only after approval.
+    const verificationEmailSent = requiresApproval
+      ? false
+      : (await this.emailVerification.issue(userId, 'registration')).emailSent;
     return {
       user: toUserResponse(user),
       requiresApproval,
+      requiresEmailVerification: true,
+      verificationEmailSent,
       accountRequestId,
       message: requiresApproval
-        ? 'Registration received. An administrator will review your account.'
-        : 'Registration complete. You can now sign in.',
+        ? 'Registration received. An administrator will review your account; after approval you will receive an email to verify your address.'
+        : verificationEmailSent
+          ? 'Registration complete. Check your email to verify your account before signing in.'
+          : 'Registration complete, but the verification email could not be sent. Request a new verification email.',
     };
   }
 
@@ -117,8 +127,8 @@ export class AuthService {
     dto: LoginDto,
     client: ClientContext,
   ): Promise<{ userId: string; passwordChangedAt: Date | null }> {
-    const authenticated = await this.verifyLoginCredentials(dto, client);
-    await this.recordAttempt(dto.email, LoginAttemptOutcome.SUCCESS, client, authenticated.userId);
+    const { identifier, ...authenticated } = await this.verifyLoginCredentials(dto, client);
+    await this.recordAttempt(identifier, LoginAttemptOutcome.SUCCESS, client, authenticated.userId);
     return authenticated;
   }
 
@@ -143,14 +153,18 @@ export class AuthService {
   private async verifyLoginCredentials(
     dto: LoginDto,
     client: ClientContext,
-  ): Promise<{ userId: string; passwordChangedAt: Date | null }> {
-    const email = dto.email;
+  ): Promise<{ userId: string; passwordChangedAt: Date | null; identifier: string }> {
+    // `identifier` accepts an email or a phone number; `email` is the legacy field name.
+    const identifierInput = dto.identifier ?? dto.email ?? '';
+    const identifier = normalizeIdentifier(identifierInput);
+    const identifierValue = identifier.value;
     const user = await this.prisma.user.findFirst({
-      where: { deletedAt: null, email },
+      where: { deletedAt: null, ...identifierWhere(identifier) },
       select: {
         id: true,
         passwordHash: true,
         status: true,
+        emailVerifiedAt: true,
         lockedUntil: true,
         passwordChangedAt: true,
       },
@@ -158,12 +172,12 @@ export class AuthService {
 
     if (!user) {
       await this.hasher.verify(dto.password, null);
-      await this.recordAttempt(email, LoginAttemptOutcome.UNKNOWN_IDENTIFIER, client);
+      await this.recordAttempt(identifierValue, LoginAttemptOutcome.UNKNOWN_IDENTIFIER, client);
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
 
     if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
-      await this.recordAttempt(email, LoginAttemptOutcome.ACCOUNT_LOCKED, client, user.id);
+      await this.recordAttempt(identifierValue, LoginAttemptOutcome.ACCOUNT_LOCKED, client, user.id);
       throw new HttpException(
         'Too many failed sign-in attempts; the account is temporarily locked. Try again later.',
         HttpStatus.LOCKED,
@@ -172,19 +186,24 @@ export class AuthService {
 
     if (!user.passwordHash) {
       await this.hasher.verify(dto.password, null);
-      await this.recordAttempt(email, LoginAttemptOutcome.NO_PASSWORD, client, user.id);
+      await this.recordAttempt(identifierValue, LoginAttemptOutcome.NO_PASSWORD, client, user.id);
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
 
     if (!(await this.hasher.verify(dto.password, user.passwordHash))) {
       await this.registerFailedPassword(user.id);
-      await this.recordAttempt(email, LoginAttemptOutcome.INVALID_PASSWORD, client, user.id);
+      await this.recordAttempt(identifierValue, LoginAttemptOutcome.INVALID_PASSWORD, client, user.id);
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
 
     if (user.status !== UserStatus.ACTIVE) {
-      await this.recordAttempt(email, LoginAttemptOutcome.ACCOUNT_NOT_ACTIVE, client, user.id);
+      await this.recordAttempt(identifierValue, LoginAttemptOutcome.ACCOUNT_NOT_ACTIVE, client, user.id);
       throw new ForbiddenException(accountStatusMessage(user.status));
+    }
+
+    if (!user.emailVerifiedAt) {
+      await this.recordAttempt(identifierValue, LoginAttemptOutcome.ACCOUNT_NOT_ACTIVE, client, user.id);
+      throw new ForbiddenException(EMAIL_NOT_VERIFIED);
     }
 
     await this.prisma.user.update({
@@ -192,7 +211,7 @@ export class AuthService {
       data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
     });
 
-    return { userId: user.id, passwordChangedAt: user.passwordChangedAt };
+    return { userId: user.id, passwordChangedAt: user.passwordChangedAt, identifier: identifierValue };
   }
 
   async refresh(refreshToken: string, client: ClientContext): Promise<AuthTokensResponseDto> {
@@ -236,11 +255,22 @@ export class AuthService {
     await this.setPassword(actor.id, dto.newPassword);
   }
 
+  async verifyEmail(token: string, code: string): Promise<void> {
+    await this.emailVerification.verify(token, code);
+  }
+
+  async resendEmailVerification(rawIdentifier: string): Promise<{ message: string }> {
+    const identifier = normalizeIdentifier(rawIdentifier);
+    return this.emailVerification.resend(
+      identifier.kind === 'email' ? { email: identifier.value } : { phoneNumber: identifier.value },
+    );
+  }
+
   async forgotPassword(
     dto: ForgotPasswordDto,
     client: ClientContext,
   ): Promise<ForgotPasswordResponseDto> {
-    const identifier = normalizeIdentifier(dto.identifier);
+    const identifier = normalizeIdentifier(dto.identifier ?? dto.email ?? '');
     const user = await this.prisma.user.findFirst({
       where: { deletedAt: null, status: UserStatus.ACTIVE, ...identifierWhere(identifier) },
       select: { id: true, phoneNumber: true, email: true, preferredLanguage: true },
@@ -251,10 +281,10 @@ export class AuthService {
 
     const token = this.tokens.generateOpaqueToken(32);
     const expiresAt = new Date(Date.now() + this.config.passwordResetTtlMinutes * 60_000);
-    const channel: 'sms' | 'email' =
-      identifier.kind === 'email' && user.email ? 'email' : 'sms';
-    const destination =
-      identifier.kind === 'email' && user.email ? user.email : user.phoneNumber;
+    // Every account has a personal email now, so the reset link goes there whichever identifier
+    // was typed; SMS remains only for legacy accounts without an email.
+    const channel: 'sms' | 'email' = user.email ? 'email' : 'sms';
+    const destination = user.email ?? user.phoneNumber;
 
     await this.passwordResetDeliveries.invalidatePendingForUser(user.id);
 

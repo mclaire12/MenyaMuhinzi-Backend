@@ -28,6 +28,19 @@ export class RegistrationResponseDto {
   @ApiProperty({ example: true })
   requiresApproval: boolean;
 
+  @ApiProperty({
+    example: true,
+    description: 'Every account must verify its personal email before signing in',
+  })
+  requiresEmailVerification: boolean;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'True only when the SMTP server accepted the verification email (never for facilitators before approval)',
+  })
+  verificationEmailSent: boolean;
+
   @ApiPropertyOptional({ format: 'uuid', nullable: true, type: String })
   accountRequestId: string | null;
 

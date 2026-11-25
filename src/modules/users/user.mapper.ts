@@ -15,6 +15,7 @@ export const userSummarySelect = {
   statusReason: true,
   statusChangedAt: true,
   preferredLanguage: true,
+  emailVerifiedAt: true,
   lastLoginAt: true,
   createdAt: true,
   updatedAt: true,

@@ -38,3 +38,5 @@ process.env.KNOWLEDGE_CHUNK_SIZE = '400';
 process.env.KNOWLEDGE_CHUNK_OVERLAP = '80';
 process.env.AI_WORKER_ENABLED = 'false';
 process.env.NOTIFICATIONS_WORKER_ENABLED = 'false';
+// Password-reset deliveries are asserted from the (faked) queue, never sent by a real worker.
+process.env.PASSWORD_RESET_WORKER_ENABLED = 'false';

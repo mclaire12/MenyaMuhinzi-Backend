@@ -20,6 +20,7 @@ export interface ProvisionAccountInput {
   preferredLanguage?: Language;
   roles: RoleCode[];
   status: UserStatus;
+  emailVerifiedAt?: Date;
   createdById?: string;
   location?: LocationDto;
   farmer?: { farmerType: FarmerType; farmerCategory?: FarmerCategory };
@@ -96,6 +97,8 @@ export class UserProvisioningService {
           email,
           preferredLanguage: input.preferredLanguage,
           status: input.status,
+          // A re-application starts unverified: the (possibly new) address must be proven again.
+          emailVerifiedAt: input.emailVerifiedAt ?? null,
           statusChangedAt: now,
           statusReason: null,
           ...(passwordHash ? { passwordHash, passwordChangedAt: now } : {}),

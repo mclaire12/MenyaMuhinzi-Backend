@@ -6,6 +6,7 @@ import { PrismaService } from '../../infrastructure/database/prisma.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { RoleCode } from '../roles/rbac.constants';
 import { locationSelect } from '../users/user.mapper';
+import { EmailVerificationService } from '../users/email-verification.service';
 import { UserProvisioningService } from '../users/user-provisioning.service';
 import { searchConditions } from '../users/users.service';
 import type {
@@ -43,6 +44,7 @@ export class FacilitatorsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly provisioning: UserProvisioningService,
+    private readonly emailVerification: EmailVerificationService,
   ) {}
 
   async list(query: ListFacilitatorsQueryDto): Promise<Paginated<FacilitatorResponseDto>> {
@@ -87,7 +89,8 @@ export class FacilitatorsService {
       location,
       facilitator: { professionalTitle, organization, contactEmail, contactPhone },
     });
-    return this.findOne(userId);
+    const { emailSent } = await this.emailVerification.issue(userId, 'staff-created');
+    return { ...(await this.findOne(userId)), emailSent };
   }
 
   async update(userId: string, dto: UpdateFacilitatorDto): Promise<FacilitatorResponseDto> {

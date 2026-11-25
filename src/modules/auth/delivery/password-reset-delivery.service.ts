@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
-import nodemailer from 'nodemailer';
+import { describeSmtpError, sendSmtpMail } from '../../../infrastructure/mail/smtp-send';
 import type { Language } from '../../../generated/prisma/client';
 import { authConfig, frontendConfig, smsConfig, smtpConfig } from '../../../config/configuration';
 import { passwordResetEmail, passwordResetSms } from './password-reset.templates';
@@ -107,27 +107,21 @@ export class PasswordResetDeliveryService {
     }
 
     const { subject, body } = passwordResetEmail({ language, resetUrl, expiresMinutes });
-    const transport = nodemailer.createTransport({
-      host: this.smtp.host,
-      port: this.smtp.port,
-      secure: this.smtp.secure,
-      auth: this.smtp.user ? { user: this.smtp.user, pass: this.smtp.password ?? '' } : undefined,
-    });
-
     try {
-      const info = await transport.sendMail({
-        from: this.smtp.from,
+      const info = await sendSmtpMail(this.smtp, {
+        from: this.smtp.from ?? '',
         to: destination,
         subject,
         text: body,
       });
       this.logger.log(
-        `Password reset email accepted for user ${userId} (messageId=${info.messageId ?? 'n/a'})`,
+        `Password reset email accepted for user ${userId} (messageId=${info.messageId ?? 'n/a'}, attempts=${info.attempts})`,
       );
       return { delivered: true, channel: 'email', provider: 'smtp' };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'send failed';
-      this.logger.warn(`Password reset email failed for user ${userId}: ${message}`);
+      this.logger.warn(
+        `Password reset email failed for user ${userId}: ${describeSmtpError(error)}`,
+      );
       throw error;
     }
   }

@@ -190,6 +190,24 @@ describe('Reports and analytics (integration)', () => {
       );
       expect(dashboard.body.farmersInScope).toBe(1);
       expect(dashboard.body.groups.map((g: { id: string }) => g.id)).toEqual([own.id]);
+      // Dashboard breakdowns stay inside the facilitator's own groups.
+      const otherFarmer = await seedAndLogin(ctx, [RoleCode.SmartphoneFarmer]);
+      await ctx.prisma.facilitatorGroupMember.create({
+        data: { groupId: other.id, userId: otherFarmer.id, addedById: otherFacilitator.id },
+      });
+      const scoped = await get('/facilitator/reports/dashboard', facilitator.accessToken).expect(
+        200,
+      );
+      const total = (rows: { count: number }[]) => rows.reduce((sum, row) => sum + row.count, 0);
+      expect(scoped.body.farmersInScope).toBe(1);
+      expect(total(scoped.body.farmersByType)).toBeLessThanOrEqual(1);
+      expect(total(scoped.body.farmersByDistrict)).toBeLessThanOrEqual(1);
+      expect(scoped.body).toMatchObject({
+        completedLessonsInRange: 0,
+        completionsOverTime: [],
+        activeLearnersInRange: 0,
+        coursesByStatus: [],
+      });
 
       await get(`/facilitator/reports/groups?groupId=${other.id}`, facilitator.accessToken).expect(
         404,

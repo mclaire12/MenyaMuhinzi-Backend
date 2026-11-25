@@ -8,11 +8,12 @@ import {
   IsNotEmptyObject,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { FarmerLocationDto, LocationDto } from '../../../common/dto/location.dto';
+import { FarmerAddressDto, LocationDto } from '../../../common/dto/location.dto';
 import {
   IsNormalizedEmail,
   IsRwandanPhone,
@@ -21,18 +22,18 @@ import {
   Trim,
 } from '../../../common/validation/validators';
 import { FarmerCategory, Language } from '../../../generated/prisma/client';
+import { FACILITATOR_TITLES, type FacilitatorTitle } from '../../facilitators/facilitator-titles';
 import { RoleCode } from '../../roles/rbac.constants';
 
 export const SELF_REGISTRATION_ROLES = [RoleCode.SmartphoneFarmer, RoleCode.Facilitator] as const;
 export type SelfRegistrationRole = (typeof SELF_REGISTRATION_ROLES)[number];
 
 export class FacilitatorDetailsDto {
-  @ApiProperty({ example: 'Agronomist' })
-  @Trim()
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(150)
-  professionalTitle: string;
+  @ApiProperty({ enum: FACILITATOR_TITLES, example: 'Agronomist' })
+  @IsIn(FACILITATOR_TITLES, {
+    message: `professionalTitle must be one of: ${FACILITATOR_TITLES.join(', ')}`,
+  })
+  professionalTitle: FacilitatorTitle;
 
   @ApiProperty({ example: 'Rwanda Agriculture Board' })
   @Trim()
@@ -73,12 +74,12 @@ export class RegisterDto {
   @IsRwandanPhone()
   phoneNumber: string;
 
-  @ApiPropertyOptional({ example: 'jeanne@example.rw', description: 'Required for facilitators' })
-  @ValidateIf(
-    (dto: RegisterDto) => dto.accountType === RoleCode.Facilitator || dto.email !== undefined,
-  )
+  @ApiProperty({
+    example: 'jeanne@example.rw',
+    description: 'Required personal email for every registrant',
+  })
   @IsNormalizedEmail()
-  email?: string;
+  email: string;
 
   @ApiProperty({
     example: 'Umuhinzi2026',
@@ -93,16 +94,16 @@ export class RegisterDto {
   preferredLanguage?: Language;
 
   @ApiProperty({
-    type: FarmerLocationDto,
+    type: FarmerAddressDto,
     description:
-      'Farmers must provide at least province, district and sector; facilitators province and district',
+      'Farmers must provide province, district, sector, cell and village; facilitators province and district (sector, cell and village optional)',
   })
   @IsNotEmptyObject()
   @ValidateNested()
   @Type((options) =>
     (options?.object as RegisterDto | undefined)?.accountType === RoleCode.Facilitator
       ? LocationDto
-      : FarmerLocationDto,
+      : FarmerAddressDto,
   )
   location: LocationDto;
 
@@ -123,9 +124,24 @@ export class RegisterDto {
 }
 
 export class LoginDto {
-  @ApiProperty({ example: 'jeanne@example.rw' })
-  @IsNormalizedEmail()
-  email: string;
+  @ApiPropertyOptional({
+    example: 'jeanne@example.rw',
+    description:
+      'Personal email or Rwandan phone number (07XXXXXXXX, 2507XXXXXXXX or +2507XXXXXXXX)',
+  })
+  @ValidateIf((dto: LoginDto) => dto.identifier !== undefined || dto.email === undefined)
+  @Trim()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(254)
+  identifier?: string;
+
+  @ApiPropertyOptional({ description: 'Deprecated compatibility field; use identifier' })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(254)
+  email?: string;
 
   @ApiProperty({ example: 'Umuhinzi2026' })
   @IsString()
@@ -172,12 +188,20 @@ export class ChangePasswordDto {
 }
 
 export class ForgotPasswordDto {
-  @ApiProperty({ example: '0788123456', description: 'Phone number or email address' })
+  @ApiPropertyOptional({ example: '0788123456', description: 'Phone number or email address' })
+  @ValidateIf((dto: ForgotPasswordDto) => dto.identifier !== undefined || dto.email === undefined)
   @Trim()
   @IsString()
   @IsNotEmpty()
   @MaxLength(254)
-  identifier: string;
+  identifier?: string;
+
+  @ApiPropertyOptional({ description: 'Deprecated compatibility field' })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(254)
+  email?: string;
 }
 
 export class ResetPasswordDto {
@@ -190,4 +214,26 @@ export class ResetPasswordDto {
   @ApiProperty({ example: 'Ibihingwa2027' })
   @IsStrongPassword()
   newPassword: string;
+}
+
+export class VerifyEmailDto {
+  @ApiProperty({ description: 'Single-use token from the verification email link' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(256)
+  token: string;
+
+  @ApiProperty({ example: '482913', description: '6-digit code from the same verification email' })
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'code must be the 6-digit code from the email' })
+  code: string;
+}
+
+export class ResendVerificationDto {
+  @ApiProperty({ example: 'jeanne@example.rw', description: 'Personal email or phone number' })
+  @Trim()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(254)
+  identifier: string;
 }

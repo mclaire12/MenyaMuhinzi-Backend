@@ -26,8 +26,15 @@ const farmerRegistration = (phoneNumber = localFormat(nextPhone())) => ({
   accountType: RoleCode.SmartphoneFarmer,
   fullName: 'Uwimana Jeanne',
   phoneNumber,
+  email: `jeanne.${phoneNumber.replace(/\D/g, '')}@example.rw`,
   password: DEFAULT_PASSWORD,
-  location: { province: 'NORTHERN', district: 'musanze', sector: 'Muhoza', cell: 'Ruhengeri' },
+  location: {
+    province: 'NORTHERN',
+    district: 'musanze',
+    sector: 'Muhoza',
+    cell: 'Ruhengeri',
+    village: 'Kigombe',
+  },
 });
 
 describe('Authentication (integration)', () => {
@@ -44,27 +51,38 @@ describe('Authentication (integration)', () => {
   beforeEach(async () => {
     await resetDatabase(ctx.prisma);
     notificationsQueue(ctx).add.mockClear();
+    ctx.mail.clear();
   });
 
   describe('POST /auth/register', () => {
-    it('registers a smartphone farmer as PENDING with an account request and no tokens', async () => {
+    it('registers a smartphone farmer without approval and sends an email verification link', async () => {
       const res = await ctx
         .http()
         .post(`${API}/auth/register`)
-        .send(farmerRegistration('0788111222'));
+        .send({ ...farmerRegistration('0788111222'), email: 'Jeanne@Example.rw' });
 
       expect(res.status).toBe(201);
       expect(res.body).toMatchObject({
-        requiresApproval: true,
+        requiresApproval: false,
+        requiresEmailVerification: true,
+        verificationEmailSent: true,
+        accountRequestId: null,
         user: {
           phoneNumber: '+250788111222',
-          status: UserStatus.PENDING,
+          status: UserStatus.ACTIVE,
           roles: [RoleCode.SmartphoneFarmer],
           preferredLanguage: 'rw',
-          email: null,
+          email: 'jeanne@example.rw',
         },
       });
-      expect(res.body.accountRequestId).toEqual(expect.any(String));
+      // The token only ever travels in the email, and only its hash is stored.
+      const [mail] = ctx.mail.verificationsFor(res.body.user.id);
+      expect(mail).toMatchObject({ to: 'jeanne@example.rw', context: 'registration' });
+      expect(JSON.stringify(res.body)).not.toContain(mail!.token);
+      const storedToken = await ctx.prisma.emailVerificationToken.findFirstOrThrow({
+        where: { userId: res.body.user.id },
+      });
+      expect(storedToken.tokenHash).not.toBe(mail!.token);
       expect(res.body).not.toHaveProperty('accessToken');
       expect(JSON.stringify(res.body)).not.toMatch(/passwordHash|scrypt/);
 
@@ -82,9 +100,71 @@ describe('Authentication (integration)', () => {
         province: 'NORTHERN',
         district: 'Musanze',
         sector: 'Muhoza',
+        cell: 'Ruhengeri',
+        village: 'Kigombe',
       });
-      expect(user.accountRequests).toHaveLength(1);
-      expect(user.accountRequests[0].status).toBe(AccountRequestStatus.PENDING);
+      expect(user.emailVerifiedAt).toBeNull();
+      // Smartphone farmers never enter the administrator approval queue.
+      expect(user.accountRequests).toHaveLength(0);
+    });
+
+    it('reports honestly when the verification email could not be sent', async () => {
+      ctx.mail.failNext = true;
+      const res = await ctx.http().post(`${API}/auth/register`).send(farmerRegistration());
+      expect(res.status).toBe(201);
+      expect(res.body.verificationEmailSent).toBe(false);
+      expect(res.body.message).toMatch(/could not be sent/);
+    });
+
+    it('requires a personal email and the full address for smartphone farmers', async () => {
+      const { email: _email, ...noEmail } = farmerRegistration();
+      const missingEmail = await ctx.http().post(`${API}/auth/register`).send(noEmail);
+      expect(missingEmail.status).toBe(400);
+      expect(missingEmail.body.message).toEqual(
+        expect.arrayContaining([expect.stringMatching(/^email/)]),
+      );
+
+      const body = farmerRegistration();
+      const missingVillage = await ctx
+        .http()
+        .post(`${API}/auth/register`)
+        .send({ ...body, location: { ...body.location, village: undefined, cell: '' } });
+      expect(missingVillage.status).toBe(400);
+      expect(missingVillage.body.message).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/location\.cell/),
+          expect.stringMatching(/location\.village/),
+        ]),
+      );
+    });
+
+    it('accepts facilitator titles only from the approved list', async () => {
+      const facilitator = (professionalTitle: string) => ({
+        accountType: RoleCode.Facilitator,
+        fullName: 'Niyonsaba Claudine',
+        phoneNumber: nextPhone(),
+        email: `claudine.${Math.random().toString(36).slice(2, 8)}@rab.gov.rw`,
+        password: DEFAULT_PASSWORD,
+        location: { province: 'SOUTHERN', district: 'Huye' },
+        facilitator: { professionalTitle, organization: 'Rwanda Agriculture Board' },
+      });
+      const invalid = await ctx
+        .http()
+        .post(`${API}/auth/register`)
+        .send(facilitator('Chief Wizard'));
+      expect(invalid.status).toBe(400);
+      expect(invalid.body.message).toEqual(
+        expect.arrayContaining([expect.stringMatching(/professionalTitle must be one of/)]),
+      );
+      const valid = await ctx
+        .http()
+        .post(`${API}/auth/register`)
+        .send(facilitator('Agricultural Extension Officer'));
+      expect(valid.status).toBe(201);
+      const profile = await ctx.prisma.facilitatorProfile.findFirstOrThrow({
+        where: { userId: valid.body.user.id },
+      });
+      expect(profile.professionalTitle).toBe('Agricultural Extension Officer');
     });
 
     it('registers a facilitator with profile details', async () => {
@@ -106,12 +186,19 @@ describe('Authentication (integration)', () => {
         });
 
       expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ requiresApproval: true, verificationEmailSent: false });
       expect(res.body.user).toMatchObject({
         email: 'claudine@rab.gov.rw',
         status: UserStatus.PENDING,
         roles: [RoleCode.Facilitator],
         preferredLanguage: 'en',
       });
+      // Verification is only triggered after an administrator approves the request.
+      expect(ctx.mail.sent).toHaveLength(0);
+      const request = await ctx.prisma.accountRequest.findFirstOrThrow({
+        where: { userId: res.body.user.id },
+      });
+      expect(request.status).toBe(AccountRequestStatus.PENDING);
       const profile = await ctx.prisma.facilitatorProfile.findFirstOrThrow({
         where: { userId: res.body.user.id },
       });
@@ -174,16 +261,25 @@ describe('Authentication (integration)', () => {
     });
 
     it('prevents a duplicate pending request', async () => {
+      const facilitator = (email: string) => ({
+        accountType: RoleCode.Facilitator,
+        fullName: 'Niyonsaba Claudine',
+        phoneNumber: '0788555666',
+        email,
+        password: DEFAULT_PASSWORD,
+        location: { province: 'SOUTHERN', district: 'Huye' },
+        facilitator: { professionalTitle: 'Agronomist', organization: 'Rwanda Agriculture Board' },
+      });
       await ctx
         .http()
         .post(`${API}/auth/register`)
-        .send(farmerRegistration('0788555666'))
+        .send(facilitator('first@rab.gov.rw'))
         .expect(201);
 
       const res = await ctx
         .http()
         .post(`${API}/auth/register`)
-        .send(farmerRegistration('0788555666'));
+        .send(facilitator('second@rab.gov.rw'));
 
       expect(res.status).toBe(409);
       expect(res.body.message).toBe(
@@ -239,22 +335,73 @@ describe('Authentication (integration)', () => {
       expect(attempt.identifier).toBe('jeanne@example.rw');
     });
 
-    it('rejects a phone number and the old identifier field', async () => {
-      const user = await seedUser(ctx.prisma, {
+    it.each(['0788123450', '250788123450', '+250 788 123 450'])(
+      'signs in with the phone number written as %s',
+      async (written) => {
+        const user = await seedUser(ctx.prisma, {
+          roles: [RoleCode.SmartphoneFarmer],
+          phoneNumber: '+250788123450',
+          email: 'jeanne@example.rw',
+        });
+        const res = await ctx
+          .http()
+          .post(`${API}/auth/login`)
+          .send({ identifier: written, password: DEFAULT_PASSWORD });
+        expect(res.status).toBe(200);
+        expect(res.body.user.id).toBe(user.id);
+        const attempt = await ctx.prisma.loginAttempt.findFirstOrThrow({
+          where: { userId: user.id, outcome: LoginAttemptOutcome.SUCCESS },
+        });
+        expect(attempt.identifier).toBe('+250788123450');
+      },
+    );
+
+    it('accepts the identifier field for email and requires one identifier', async () => {
+      await seedUser(ctx.prisma, {
         roles: [RoleCode.SmartphoneFarmer],
         email: 'jeanne@example.rw',
       });
+      await ctx
+        .http()
+        .post(`${API}/auth/login`)
+        .send({ identifier: 'JEANNE@example.rw', password: DEFAULT_PASSWORD })
+        .expect(200);
+      await ctx.http().post(`${API}/auth/login`).send({ password: DEFAULT_PASSWORD }).expect(400);
+      await ctx
+        .http()
+        .post(`${API}/auth/login`)
+        .send({ identifier: '', password: DEFAULT_PASSWORD })
+        .expect(400);
+    });
+
+    it('refuses an unverified smartphone farmer until the email is verified', async () => {
+      const registered = await ctx
+        .http()
+        .post(`${API}/auth/register`)
+        .send(farmerRegistration('0788222333'))
+        .expect(201);
+
+      for (const identifier of [registered.body.user.email, '0788222333']) {
+        const res = await ctx
+          .http()
+          .post(`${API}/auth/login`)
+          .send({ identifier, password: DEFAULT_PASSWORD });
+        expect(res.status).toBe(403);
+        expect(res.body.message).toBe('Email verification is required before login');
+      }
+      await expect(ctx.prisma.refreshToken.count()).resolves.toBe(0);
 
       await ctx
         .http()
-        .post(`${API}/auth/login`)
-        .send({ email: localFormat(user.phoneNumber), password: DEFAULT_PASSWORD })
-        .expect(400);
-      await ctx
+        .post(`${API}/auth/verify-email`)
+        .send(ctx.mail.latestVerification(registered.body.user.id))
+        .expect(204);
+      const res = await ctx
         .http()
         .post(`${API}/auth/login`)
-        .send({ identifier: user.email, password: DEFAULT_PASSWORD })
-        .expect(400);
+        .send({ identifier: '0788222333', password: DEFAULT_PASSWORD });
+      expect(res.status).toBe(200);
+      expect(res.body.user.roles).toEqual([RoleCode.SmartphoneFarmer]);
     });
 
     it('returns the same 401 for a wrong password and an unknown account', async () => {
@@ -566,9 +713,13 @@ describe('Authentication (integration)', () => {
       expect(notificationsQueue(ctx).add).not.toHaveBeenCalled();
     });
 
-    it('queues an SMS delivery job and resets the password with the single-use token', async () => {
-      const user = await seedUser(ctx.prisma, { roles: [RoleCode.SmartphoneFarmer] });
+    it('emails the reset link even when the phone number is typed, and resets with the single-use token', async () => {
+      const user = await seedUser(ctx.prisma, {
+        roles: [RoleCode.SmartphoneFarmer],
+        email: 'jeanne@example.rw',
+      });
       const session = await login(ctx, user.phoneNumber);
+      const second = await login(ctx, 'jeanne@example.rw');
 
       const forgot = await ctx
         .http()
@@ -589,8 +740,8 @@ describe('Authentication (integration)', () => {
       const resolved = await store.resolveForWorker(job.deliveryId);
       expect(resolved).toMatchObject({
         userId: user.id,
-        channel: 'sms',
-        destination: user.phoneNumber,
+        channel: 'email',
+        destination: 'jeanne@example.rw',
         language: 'rw',
       });
       const resetToken = resolved!.resetToken;
@@ -606,10 +757,18 @@ describe('Authentication (integration)', () => {
         .send({ token: resetToken, newPassword: 'Ibihingwa2027' })
         .expect(204);
 
+      // Every existing session is revoked, and only the new password works.
+      for (const old of [session, second]) {
+        await ctx
+          .http()
+          .post(`${API}/auth/refresh`)
+          .send({ refreshToken: old.refreshToken })
+          .expect(401);
+      }
       await ctx
         .http()
-        .post(`${API}/auth/refresh`)
-        .send({ refreshToken: session.refreshToken })
+        .post(`${API}/auth/login`)
+        .send({ identifier: user.phoneNumber, password: DEFAULT_PASSWORD })
         .expect(401);
       await login(ctx, user.phoneNumber, 'Ibihingwa2027');
 

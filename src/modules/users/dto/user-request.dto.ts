@@ -36,10 +36,9 @@ export class CreateUserDto {
   @IsRwandanPhone()
   phoneNumber: string;
 
-  @ApiPropertyOptional({ example: 'alice@example.rw' })
-  @IsOptional()
+  @ApiProperty({ example: 'alice@example.rw', description: 'Mandatory personal email for every user' })
   @IsNormalizedEmail()
-  email?: string;
+  email: string;
 
   @ApiPropertyOptional({
     example: 'Umuhinzi2026',
@@ -77,10 +76,15 @@ export class UpdateUserDto {
   @IsRwandanPhone()
   phoneNumber?: string;
 
-  @ApiPropertyOptional({ example: 'alice@example.rw', nullable: true, description: 'null removes the email' })
-  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @ApiPropertyOptional({
+    example: 'alice@example.rw',
+    description:
+      'Personal email is mandatory and cannot be removed. Changing it requires the new address to be verified.',
+  })
+  // Only an absent field is skipped: null is validated (and rejected) like any other value.
+  @ValidateIf((_, value) => value !== undefined)
   @IsNormalizedEmail()
-  email?: string | null;
+  email?: string;
 
   @ApiPropertyOptional({ enum: Language })
   @IsOptional()

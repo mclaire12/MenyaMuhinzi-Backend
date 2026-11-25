@@ -35,7 +35,7 @@ function IsDistrictOfProvince(): PropertyDecorator {
 }
 
 /**
- * Sector is declared by each subclass: class-validator merges inherited
+ * Sector, cell and village are declared by each subclass: class-validator merges inherited
  * metadata, so a parent @IsOptional() would make a redeclared field optional.
  */
 abstract class BaseLocationDto {
@@ -52,6 +52,17 @@ abstract class BaseLocationDto {
   district: string;
 
   abstract sector?: string;
+  abstract cell?: string;
+  abstract village?: string;
+}
+
+export class LocationDto extends BaseLocationDto {
+  @ApiPropertyOptional({ example: 'Muhoza' })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(80)
+  sector?: string;
 
   @ApiPropertyOptional({ example: 'Ruhengeri' })
   @IsOptional()
@@ -68,16 +79,7 @@ abstract class BaseLocationDto {
   village?: string;
 }
 
-export class LocationDto extends BaseLocationDto {
-  @ApiPropertyOptional({ example: 'Muhoza' })
-  @IsOptional()
-  @Trim()
-  @IsString()
-  @MaxLength(80)
-  sector?: string;
-}
-
-/** Farmers must at least provide their sector. */
+/** Farmer groups and other farmer-area locations must at least provide their sector. */
 export class FarmerLocationDto extends BaseLocationDto {
   @ApiProperty({ example: 'Muhoza' })
   @Trim()
@@ -85,6 +87,44 @@ export class FarmerLocationDto extends BaseLocationDto {
   @IsNotEmpty()
   @MaxLength(80)
   sector: string;
+
+  @ApiPropertyOptional({ example: 'Ruhengeri' })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(80)
+  cell?: string;
+
+  @ApiPropertyOptional({ example: 'Kigombe' })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(80)
+  village?: string;
+}
+
+/** A farmer account's home address: province, district, sector, cell and village are all required. */
+export class FarmerAddressDto extends BaseLocationDto {
+  @ApiProperty({ example: 'Muhoza' })
+  @Trim()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  sector: string;
+
+  @ApiProperty({ example: 'Ruhengeri' })
+  @Trim()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  cell: string;
+
+  @ApiProperty({ example: 'Kigombe' })
+  @Trim()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  village: string;
 }
 
 /** Province and district, with an optional sector. No cell or village. */
@@ -128,6 +168,11 @@ export class LocationResponseDto {
 }
 
 /** Canonical spelling for persisted districts (e.g. "musanze" -> "Musanze"). */
-export function normalizeLocation<T extends { province: Province; district: string }>(location: T): T {
-  return { ...location, district: findDistrict(location.province, location.district) ?? location.district };
+export function normalizeLocation<T extends { province: Province; district: string }>(
+  location: T,
+): T {
+  return {
+    ...location,
+    district: findDistrict(location.province, location.district) ?? location.district,
+  };
 }
