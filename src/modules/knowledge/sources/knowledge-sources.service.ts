@@ -9,7 +9,12 @@ import {
 } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { knowledgeConfig } from '../../../config/configuration';
-import { paginated, paginationArgs, type Paginated } from '../../../common/dto/pagination.dto';
+import {
+  paginated,
+  paginationArgs,
+  type Paginated,
+  type PaginationQueryDto,
+} from '../../../common/dto/pagination.dto';
 import {
   EmbeddingStatus,
   KnowledgeReviewAction,
@@ -34,6 +39,7 @@ import type {
   ProcessingStatusResponseDto,
   ProcessResponseDto,
   SourceHistoryResponseDto,
+  TrainingCorpusEntryDto,
   UpdateKnowledgeSourceDto,
 } from '../dto/knowledge-source.dto';
 import {
@@ -53,7 +59,13 @@ import {
   validateDocument,
 } from '../processing/document-validation';
 import { KnowledgeStorageService, StorageKeyError } from '../storage/knowledge-storage.service';
-import { chunkSelect, sourceInclude, toSourceResponse, type SourceRecord } from './source.mapper';
+import {
+  chunkSelect,
+  sourceInclude,
+  toSourceResponse,
+  versionSelect,
+  type SourceRecord,
+} from './source.mapper';
 import { syncSourceStatus } from './source-status';
 
 /** The parts of a Multer upload this service uses. */
@@ -115,6 +127,7 @@ export class KnowledgeSourcesService {
             sourceOrganization: dto.sourceOrganization,
             author: dto.author,
             publicationDate: dto.publicationDate ? new Date(dto.publicationDate) : undefined,
+            includeInTraining: dto.includeInTraining ?? true,
             latestVersionNumber: 1,
             createdById: actor.id,
             crops: { create: cropIds.map((cropId) => ({ cropId })) },
@@ -237,6 +250,7 @@ export class KnowledgeSourcesService {
           sourceOrganization: dto.sourceOrganization,
           author: dto.author,
           publicationDate: dto.publicationDate ? new Date(dto.publicationDate) : undefined,
+          includeInTraining: dto.includeInTraining,
         },
       });
       if (cropIds) {
@@ -641,6 +655,56 @@ export class KnowledgeSourcesService {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Approved, active sources marked for training, with the exact approved version, so the
+   * model-training pipeline can retrain on the same documents the assistant retrieves from.
+   */
+  async trainingCorpus(query: PaginationQueryDto): Promise<Paginated<TrainingCorpusEntryDto>> {
+    const where: Prisma.KnowledgeSourceWhereInput = {
+      includeInTraining: true,
+      archivedAt: null,
+      approvedVersionId: { not: null },
+    };
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.knowledgeSource.findMany({
+        where,
+        orderBy: { approvedAt: 'desc' },
+        select: {
+          id: true,
+          title: true,
+          sourceType: true,
+          language: true,
+          approvedAt: true,
+          crops: { select: { crop: { select: { code: true } } } },
+          topics: { select: { topic: { select: { code: true } } } },
+          approvedVersion: { select: versionSelect },
+        },
+        ...paginationArgs(query),
+      }),
+      this.prisma.knowledgeSource.count({ where }),
+    ]);
+    return paginated(
+      rows.flatMap((row) =>
+        row.approvedVersion
+          ? [
+              {
+                sourceId: row.id,
+                title: row.title,
+                sourceType: row.sourceType,
+                language: row.language,
+                cropCodes: row.crops.map((link) => link.crop.code),
+                topicCodes: row.topics.map((link) => link.topic.code),
+                approvedAt: row.approvedAt,
+                version: row.approvedVersion as unknown as TrainingCorpusEntryDto['version'],
+              },
+            ]
+          : [],
+      ),
+      total,
+      query,
+    );
+  }
 
   async requireSource(id: string): Promise<SourceRecord> {
     const source = await this.prisma.knowledgeSource.findUnique({

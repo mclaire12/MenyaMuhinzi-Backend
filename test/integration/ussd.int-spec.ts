@@ -10,6 +10,7 @@ import {
 import {
   API,
   bearer,
+  createCourseFixture,
   createTestContext,
   resetDatabase,
   seedAndLogin,
@@ -56,11 +57,7 @@ describe('USSD infrastructure (integration)', () => {
     });
 
     const tomatoId = (await ctx.prisma.crop.findUniqueOrThrow({ where: { code: 'TOMATO' } })).id;
-    const course = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send({
+    const course = await createCourseFixture(ctx, admin.id, {
         title: 'Tomato basics USSD',
         shortDescription: 'USSD course',
         detailedDescription: 'USSD',

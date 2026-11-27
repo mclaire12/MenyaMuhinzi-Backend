@@ -1,13 +1,22 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { paginated, paginationArgs, type Paginated } from '../../common/dto/pagination.dto';
-import { CourseStatus, Prisma, PublicationScope, RecordStatus } from '../../generated/prisma/client';
+import {
+  CourseStatus,
+  Prisma,
+  PublicationScope,
+  RecordStatus,
+} from '../../generated/prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { assertActiveCrop, cropSummarySelect } from '../crops/crop.lookup';
 import { isAdmin } from '../groups/facilitator-groups.service';
 import { RoleCode } from '../roles/rbac.constants';
-import { assertCanDeleteCourse, assertCourseStatusChange } from './course-status.policy';
-import type { CourseResponseDto, CreateCourseDto, ListCoursesQueryDto, UpdateCourseDto } from './dto/course.dto';
+import {
+  assertCanDeleteCourse,
+  assertCourseStatusChange,
+  assertGenerationFinished,
+} from './course-status.policy';
+import type { CourseResponseDto, ListCoursesQueryDto, UpdateCourseDto } from './dto/course.dto';
 import {
   audienceAllows,
   audiencesForRoles,
@@ -37,22 +46,36 @@ const courseSelect = {
   updatedAt: true,
   crop: { select: cropSummarySelect },
   createdBy: { select: { id: true, fullName: true } },
+  facilitatorOwner: { select: { id: true, fullName: true } },
+  groupCourses: {
+    select: { group: { select: { id: true, name: true, facilitatorId: true } } },
+    orderBy: { assignedAt: 'asc' },
+  },
+  generation: { select: { id: true, status: true } },
 } satisfies Prisma.CourseSelect;
 
+
 type CourseRecord = Prisma.CourseGetPayload<{ select: typeof courseSelect }>;
+
+/**
+ * Facilitator courses list the groups they are published to; only administrators and the
+ * owning facilitator see those group names.
+ */
+function toCourseResponse(course: CourseRecord, actor: AuthenticatedUser): CourseResponseDto {
+  const { groupCourses, ...rest } = course;
+  const showGroups =
+    !!course.facilitatorOwner && (isAdmin(actor) || course.facilitatorOwner.id === actor.id);
+  return {
+    ...rest,
+    sharedWithGroups: showGroups
+      ? groupCourses.map(({ group }) => ({ id: group.id, name: group.name }))
+      : [],
+  };
+}
 
 @Injectable()
 export class CoursesService {
   constructor(private readonly prisma: PrismaService) {}
-
-  async create(dto: CreateCourseDto, actor: AuthenticatedUser): Promise<CourseResponseDto> {
-    await assertActiveCrop(this.prisma, dto.cropId);
-    const course = await this.prisma.course.create({
-      data: { ...dto, createdById: actor.id },
-      select: courseSelect,
-    });
-    return course;
-  }
 
   async list(query: ListCoursesQueryDto, actor: AuthenticatedUser): Promise<Paginated<CourseResponseDto>> {
     const where: Prisma.CourseWhereInput = {};
@@ -60,6 +83,8 @@ export class CoursesService {
     if (query.language) where.language = query.language;
     if (query.category) where.category = query.category;
     if (query.difficulty) where.difficulty = query.difficulty;
+    if (query.ownership === 'GROUP') where.facilitatorOwnerId = { not: null };
+    if (query.ownership === 'PLATFORM') where.facilitatorOwnerId = null;
     const and: Prisma.CourseWhereInput[] = [];
     if (query.search) {
       and.push({
@@ -74,8 +99,19 @@ export class CoursesService {
     } else if (this.isFarmer(actor)) {
       and.push(await this.farmerVisibilityWhere(actor));
     } else {
-      where.status = CourseStatus.PUBLISHED;
-      where.publications = { some: await this.visiblePublicationWhere(actor.id) };
+      if (query.status) where.status = query.status;
+      // Facilitators: published courses for the platform or their area, plus the
+      // courses they generated for their own groups (any status).
+      and.push({
+        OR: [
+          {
+            status: CourseStatus.PUBLISHED,
+            facilitatorOwnerId: null,
+            publications: { some: await this.visiblePublicationWhere(actor.id) },
+          },
+          { facilitatorOwnerId: actor.id },
+        ],
+      });
     }
     if (and.length > 0) where.AND = and;
 
@@ -88,13 +124,13 @@ export class CoursesService {
       }),
       this.prisma.course.count({ where }),
     ]);
-    return paginated(courses, total, query);
+    return paginated(courses.map((course) => toCourseResponse(course, actor)), total, query);
   }
 
   async findOne(id: string, actor: AuthenticatedUser): Promise<CourseResponseDto> {
     const course = await this.prisma.course.findUnique({ where: { id }, select: courseSelect });
     if (!course || !(await this.canView(course, actor))) throw new NotFoundException('Course not found');
-    return course;
+    return toCourseResponse(course, actor);
   }
 
   async update(id: string, dto: UpdateCourseDto, actor: AuthenticatedUser): Promise<CourseResponseDto> {
@@ -111,7 +147,7 @@ export class CoursesService {
           await closeCurrentPublication(tx, id, actor.id);
         }
       }
-      return tx.course.update({ where: { id }, data: dto, select: courseSelect });
+      return toCourseResponse(await tx.course.update({ where: { id }, data: dto, select: courseSelect }), actor);
     });
   }
 
@@ -150,6 +186,7 @@ export class CoursesService {
   private async canView(course: CourseRecord, actor: AuthenticatedUser): Promise<boolean> {
     if (isAdmin(actor)) return true;
     if (this.isFarmer(actor)) return this.farmerCanView(course, actor);
+    if (course.facilitatorOwner) return course.facilitatorOwner.id === actor.id;
     if (course.status !== CourseStatus.PUBLISHED) return false;
     const publication = await this.prisma.coursePublication.findFirst({
       where: { courseId: course.id, isCurrent: true },
@@ -190,6 +227,17 @@ export class CoursesService {
   private async farmerCanView(course: CourseRecord, actor: AuthenticatedUser): Promise<boolean> {
     if (course.status !== CourseStatus.PUBLISHED) return false;
     if (!audienceAllows(course.targetAudience, actor.roles)) return false;
+    if (course.facilitatorOwner) {
+      // Facilitator courses reach only the members of the groups they are published to.
+      const member = await this.prisma.facilitatorGroupMember.findFirst({
+        where: {
+          userId: actor.id,
+          group: { status: RecordStatus.ACTIVE, courses: { some: { courseId: course.id } } },
+        },
+        select: { userId: true },
+      });
+      return member !== null;
+    }
     const publication = await this.prisma.coursePublication.findFirst({
       where: { courseId: course.id, isCurrent: true },
       select: {
@@ -221,6 +269,13 @@ export class CoursesService {
     const farmer = await this.farmerArea(actor.id);
     const or: Prisma.CourseWhereInput[] = [
       { publications: { some: { isCurrent: true, scope: PublicationScope.PLATFORM } } },
+      // Courses a facilitator generated and published to a group the farmer belongs to.
+      {
+        facilitatorOwnerId: { not: null },
+        groupCourses: {
+          some: { group: { status: RecordStatus.ACTIVE, members: { some: { userId: actor.id } } } },
+        },
+      },
       {
         AND: [
           { publications: { some: { isCurrent: true } } },
@@ -274,6 +329,56 @@ export class CoursesService {
     const cropIds = [...new Set(memberships.map((membership) => membership.group.cropId))];
     if (cropIds.length === 0) return null;
     return { province: location.province, district: location.district, sector: location.sector, cropIds };
+  }
+
+  /**
+   * Publishes a facilitator's own course to one or more of their own active groups. Calling it
+   * again replaces the set of groups. The course never gets a platform or targeted publication.
+   */
+  async publishToGroups(id: string, groupIds: string[], actor: AuthenticatedUser): Promise<CourseResponseDto> {
+    const course = await this.ownedFacilitatorCourse(id, actor);
+    if (course.status === CourseStatus.ARCHIVED) throw new ConflictException('Archived courses cannot be published');
+    assertGenerationFinished(course.generation);
+    const lessons = await this.prisma.lesson.count({ where: { module: { courseId: id } } });
+    if (lessons === 0) throw new BadRequestException('Add at least one sub-chapter before publishing the course');
+    const unique = [...new Set(groupIds)];
+    const groups = await this.prisma.facilitatorGroup.count({
+      where: { id: { in: unique }, facilitatorId: actor.id, status: RecordStatus.ACTIVE },
+    });
+    if (groups !== unique.length) {
+      throw new BadRequestException('Choose only your own active groups');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.facilitatorGroupCourse.deleteMany({ where: { courseId: id, groupId: { notIn: unique } } });
+      await tx.facilitatorGroupCourse.createMany({
+        data: unique.map((groupId) => ({ groupId, courseId: id, assignedById: actor.id })),
+        skipDuplicates: true,
+      });
+      if (course.status !== CourseStatus.PUBLISHED) {
+        await tx.course.update({ where: { id }, data: { status: CourseStatus.PUBLISHED, publishedAt: new Date() } });
+      }
+    });
+    return this.findOne(id, actor);
+  }
+
+  /** Withdraws a facilitator course from every group; it returns to draft. Progress is kept. */
+  async unpublishFromGroups(id: string, actor: AuthenticatedUser): Promise<CourseResponseDto> {
+    const course = await this.ownedFacilitatorCourse(id, actor);
+    if (course.status !== CourseStatus.PUBLISHED) throw new ConflictException('The course is not published to any group');
+    await this.prisma.$transaction([
+      this.prisma.facilitatorGroupCourse.deleteMany({ where: { courseId: id } }),
+      this.prisma.course.update({ where: { id }, data: { status: CourseStatus.DRAFT, publishedAt: null } }),
+    ]);
+    return this.findOne(id, actor);
+  }
+
+  private async ownedFacilitatorCourse(id: string, actor: AuthenticatedUser) {
+    const course = await this.prisma.course.findUnique({
+      where: { id },
+      select: { status: true, facilitatorOwnerId: true, generation: { select: { status: true } } },
+    });
+    if (!course || course.facilitatorOwnerId !== actor.id) throw new NotFoundException('Course not found');
+    return course;
   }
 
   private async ownGroups(facilitatorId: string): Promise<AreaMatch[]> {

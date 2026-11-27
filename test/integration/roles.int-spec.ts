@@ -46,6 +46,8 @@ describe('Roles and permissions (integration)', () => {
       'ai-conversations:manage',
       'assessments:read',
       'assessments:review',
+      'course-generations:create',
+      'course-generations:read',
       'courses:read',
       'crops:read',
       'enrollments:read',
@@ -67,7 +69,7 @@ describe('Roles and permissions (integration)', () => {
       .get(`${API}/roles/permissions`)
       .set(...bearer(admin.accessToken))
       .expect(200);
-    expect(permissions.body).toHaveLength(71);
+    expect(permissions.body).toHaveLength(75);
   });
 
   it('changes role permissions with immediate effect', async () => {

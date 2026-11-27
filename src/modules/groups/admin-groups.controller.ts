@@ -24,6 +24,7 @@ import { Authorize, CurrentUser } from '../auth/decorators/auth.decorators';
 import { Permission, RoleCode } from '../roles/rbac.constants';
 import { AdminGroupsService } from './admin-groups.service';
 import {
+  AdminGroupCourseDto,
   AdminGroupListResponseDto,
   AdminGroupResponseDto,
   CreateAdminGroupDto,
@@ -67,6 +68,18 @@ export class AdminGroupsController {
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'Targeting group not found' })
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<AdminGroupResponseDto> {
     return this.groups.findOne(id);
+  }
+
+  @Get(':id/courses')
+  @Authorize({ roles: [RoleCode.Admin], permissions: [Permission.TargetingGroupsRead] })
+  @ApiOperation({
+    summary: 'Courses currently published to a course-targeting group',
+    description: 'Only current publications are listed. **Admin only.**',
+  })
+  @ApiOkResponse({ type: AdminGroupCourseDto, isArray: true })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'Targeting group not found' })
+  courses(@Param('id', ParseUUIDPipe) id: string): Promise<AdminGroupCourseDto[]> {
+    return this.groups.courses(id);
   }
 
   @Patch(':id')

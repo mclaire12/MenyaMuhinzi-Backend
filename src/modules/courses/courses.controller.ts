@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -21,7 +21,7 @@ import { CreateLessonDto, CreateModuleDto, LessonResponseDto, ModuleResponseDto,
 import { CreateLessonResourceDto, LessonResourceResponseDto, UpdateLessonResourceDto } from './dto/lesson-resource.dto';
 
 const courseReaders = [RoleCode.Admin, RoleCode.Facilitator, RoleCode.SmartphoneFarmer, RoleCode.BasicPhoneFarmer];
-import { CourseListResponseDto, CourseResponseDto, CreateCourseDto, ListCoursesQueryDto, UpdateCourseDto } from './dto/course.dto';
+import { CourseListResponseDto, CourseResponseDto, ListCoursesQueryDto, PublishToGroupsDto, UpdateCourseDto } from './dto/course.dto';
 import { CoursePublicationResponseDto, PublishCourseDto } from './dto/publication.dto';
 
 @ApiTags('Courses')
@@ -30,13 +30,8 @@ import { CoursePublicationResponseDto, PublishCourseDto } from './dto/publicatio
 export class CoursesController {
   constructor(private readonly courses: CoursesService) {}
 
-  @Post()
-  @Authorize({ roles: [RoleCode.Admin], permissions: [Permission.CoursesManage] })
-  @ApiOperation({ summary: 'Create a draft course', description: 'The creator is recorded. **Admin only.**' })
-  @ApiCreatedResponse({ type: CourseResponseDto })
-  create(@Body() dto: CreateCourseDto, @CurrentUser() actor: AuthenticatedUser): Promise<CourseResponseDto> {
-    return this.courses.create(dto, actor);
-  }
+  // Courses are not created by hand: POST /course-generations saves the outline and creates
+  // the draft course that the AI model writes.
 
   @Get()
   @Authorize({ roles: courseReaders, permissions: [Permission.CoursesRead] })
@@ -48,6 +43,33 @@ export class CoursesController {
   @ApiOkResponse({ type: CourseListResponseDto })
   list(@Query() query: ListCoursesQueryDto, @CurrentUser() actor: AuthenticatedUser): Promise<Paginated<CourseResponseDto>> {
     return this.courses.list(query, actor);
+  }
+
+  @Put(':id/groups')
+  @Authorize({ roles: [RoleCode.Facilitator], permissions: [Permission.GroupCoursesAssign] })
+  @ApiOperation({
+    summary: 'Publish a facilitator course to one or more of their groups',
+    description:
+      'Only for courses the facilitator generated. The list replaces the groups the course is published to; only members of those groups see it. **Facilitator (owner).**',
+  })
+  @ApiOkResponse({ type: CourseResponseDto })
+  publishToGroups(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PublishToGroupsDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ): Promise<CourseResponseDto> {
+    return this.courses.publishToGroups(id, dto.groupIds, actor);
+  }
+
+  @Delete(':id/groups')
+  @Authorize({ roles: [RoleCode.Facilitator], permissions: [Permission.GroupCoursesAssign] })
+  @ApiOperation({
+    summary: 'Stop publishing a facilitator course to its groups',
+    description: 'The course returns to draft. Learner progress is kept. **Facilitator (owner).**',
+  })
+  @ApiOkResponse({ type: CourseResponseDto })
+  unpublishFromGroups(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser): Promise<CourseResponseDto> {
+    return this.courses.unpublishFromGroups(id, actor);
   }
 
   @Get(':id')

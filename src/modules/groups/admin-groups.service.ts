@@ -7,6 +7,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { cropSummarySelect } from '../crops/crop.lookup';
 import { assertActiveCrop } from '../crops/crop.lookup';
 import type {
+  AdminGroupCourseDto,
   AdminGroupResponseDto,
   CreateAdminGroupDto,
   ListAdminGroupsQueryDto,
@@ -53,6 +54,33 @@ export class AdminGroupsService {
       select: adminGroupSelect,
     });
     return toAdminGroup(group);
+  }
+
+  /** Courses whose current publication targets this group (newest first). */
+  async courses(id: string): Promise<AdminGroupCourseDto[]> {
+    const group = await this.prisma.adminTargetingGroup.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!group) throw new NotFoundException('Targeting group not found');
+    const publications = await this.prisma.coursePublication.findMany({
+      where: { isCurrent: true, targets: { some: { groupId: id } } },
+      orderBy: { publishedAt: 'desc' },
+      select: {
+        id: true,
+        publishedAt: true,
+        publishedBy: { select: { id: true, fullName: true } },
+        course: { select: { id: true, title: true, status: true } },
+      },
+    });
+    return publications.map((publication) => ({
+      courseId: publication.course.id,
+      title: publication.course.title,
+      status: publication.course.status,
+      publicationId: publication.id,
+      publishedAt: publication.publishedAt,
+      publishedBy: publication.publishedBy,
+    }));
   }
 
   async list(query: ListAdminGroupsQueryDto): Promise<Paginated<AdminGroupResponseDto>> {

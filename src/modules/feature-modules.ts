@@ -5,6 +5,7 @@ import { UsersModule } from './users/users.module';
 import { FarmersModule } from './farmers/farmers.module';
 import { FacilitatorsModule } from './facilitators/facilitators.module';
 import { GroupsModule } from './groups/groups.module';
+import { CourseGenerationModule } from './course-generation/course-generation.module';
 import { CoursesModule } from './courses/courses.module';
 import { CropsModule } from './crops/crops.module';
 import { LessonsModule } from './lessons/lessons.module';
@@ -36,6 +37,7 @@ export const FEATURE_MODULES = [
   CropsModule,
   GroupsModule,
   CoursesModule,
+  CourseGenerationModule,
   LessonsModule,
   TeachingMaterialsModule,
   EnrollmentsModule,

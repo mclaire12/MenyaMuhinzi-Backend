@@ -2,6 +2,7 @@ import { RoleCode } from '../../src/modules/roles/rbac.constants';
 import {
   API,
   bearer,
+  createCourseFixture,
   createTestContext,
   resetDatabase,
   seedAndLogin,
@@ -43,11 +44,7 @@ describe('Courses, modules and lessons (integration)', () => {
   });
 
   it('creates and updates a draft course owned by the administrator', async () => {
-    const created = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send(courseBody());
+    const created = await createCourseFixture(ctx, admin.id, courseBody());
 
     expect(created.status).toBe(201);
     expect(created.body).toMatchObject({
@@ -78,20 +75,16 @@ describe('Courses, modules and lessons (integration)', () => {
     expect(listed.body.data).toHaveLength(1);
   });
 
-  it('rejects incomplete courses and direct publishing through update', async () => {
-    const missing = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send({ title: 'Incomplete' });
-    expect(missing.status).toBe(400);
-
-    const created = await ctx
+  it('has no manual course creation and rejects direct publishing through update', async () => {
+    // Courses are only created through AI course generation (POST /course-generations).
+    await ctx
       .http()
       .post(`${API}/courses`)
       .set(...bearer(admin.accessToken))
       .send(courseBody())
-      .expect(201);
+      .expect(404);
+
+    const created = await createCourseFixture(ctx, admin.id, courseBody());
     const published = await ctx
       .http()
       .patch(`${API}/courses/${created.body.id}`)
@@ -101,12 +94,7 @@ describe('Courses, modules and lessons (integration)', () => {
   });
 
   it('adds modules and lessons in display order', async () => {
-    const course = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send(courseBody())
-      .expect(201);
+    const course = await createCourseFixture(ctx, admin.id, courseBody());
 
     const first = await ctx
       .http()
@@ -165,21 +153,10 @@ describe('Courses, modules and lessons (integration)', () => {
   });
 
   it('forbids facilitators and farmers from managing courses', async () => {
-    const course = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send(courseBody())
-      .expect(201);
+    const course = await createCourseFixture(ctx, admin.id, courseBody());
     const facilitator = await seedAndLogin(ctx, [RoleCode.Facilitator]);
     const farmer = await seedAndLogin(ctx, [RoleCode.SmartphoneFarmer]);
 
-    await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(facilitator.accessToken))
-      .send(courseBody())
-      .expect(403);
     await ctx
       .http()
       .patch(`${API}/courses/${course.body.id}`)
@@ -199,7 +176,6 @@ describe('Courses, modules and lessons (integration)', () => {
     expect(catalogue.body.data.map((item: { id: string }) => item.id)).not.toContain(
       course.body.id,
     );
-    await ctx.http().post(`${API}/courses`).expect(401);
 
     const stored = await ctx.prisma.course.findUniqueOrThrow({ where: { id: course.body.id } });
     expect(stored.createdById).toBe(admin.id);
@@ -207,24 +183,14 @@ describe('Courses, modules and lessons (integration)', () => {
   });
 
   it('deletes a draft and refuses to delete a course that was published', async () => {
-    const draft = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send(courseBody())
-      .expect(201);
+    const draft = await createCourseFixture(ctx, admin.id, courseBody());
     await ctx
       .http()
       .delete(`${API}/courses/${draft.body.id}`)
       .set(...bearer(admin.accessToken))
       .expect(204);
 
-    const published = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send(courseBody())
-      .expect(201);
+    const published = await createCourseFixture(ctx, admin.id, courseBody());
     await ctx
       .http()
       .post(`${API}/courses/${published.body.id}/publish`)

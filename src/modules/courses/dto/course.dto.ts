@@ -31,6 +31,8 @@ const trimList = ({ value }: { value: unknown }) =>
   Array.isArray(value) ? value.map((item) => (typeof item === 'string' ? item.trim() : item)) : value;
 
 /** Status values a client may set. PUBLISHED is only reached through the publish endpoint. */
+export const COURSE_OWNERSHIP = ['GROUP', 'PLATFORM'] as const;
+
 export const SETTABLE_COURSE_STATUSES = [CourseStatus.DRAFT, CourseStatus.UNDER_REVIEW, CourseStatus.ARCHIVED] as const;
 
 export class CreateCourseDto {
@@ -195,7 +197,10 @@ export class ListCoursesQueryDto extends PaginationQueryDto {
   @MaxLength(100)
   search?: string;
 
-  @ApiPropertyOptional({ enum: CourseStatus, description: 'Administrators only. Other callers see published courses.' })
+  @ApiPropertyOptional({
+    enum: CourseStatus,
+    description: 'Administrators and facilitators (their own group courses can be drafts). Farmers only see published courses.',
+  })
   @IsOptional()
   @IsEnum(CourseStatus)
   status?: CourseStatus;
@@ -219,6 +224,23 @@ export class ListCoursesQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(DifficultyLevel)
   difficulty?: DifficultyLevel;
+
+  @ApiPropertyOptional({
+    enum: COURSE_OWNERSHIP,
+    description: 'GROUP: facilitator group courses only; PLATFORM: platform courses only',
+  })
+  @IsOptional()
+  @IsIn(COURSE_OWNERSHIP)
+  ownership?: (typeof COURSE_OWNERSHIP)[number];
+}
+
+export class PublishToGroupsDto {
+  @ApiProperty({ type: String, isArray: true, format: 'uuid', minItems: 1, maxItems: 50 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @IsUUID('all', { each: true })
+  groupIds: string[];
 }
 
 export class CourseResponseDto {
@@ -272,6 +294,24 @@ export class CourseResponseDto {
 
   @ApiProperty()
   updatedAt: Date;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Set for courses a facilitator generated; they are published to that facilitator\'s groups only',
+  })
+  facilitatorOwner: { id: string; fullName: string } | null;
+
+  @ApiProperty({
+    description: 'Groups a facilitator course is published to (administrators and the owner only)',
+    isArray: true,
+  })
+  sharedWithGroups: { id: string; name: string }[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'The AI generation request that produced this course',
+  })
+  generation: { id: string; status: string } | null;
 }
 
 export class CourseListResponseDto {

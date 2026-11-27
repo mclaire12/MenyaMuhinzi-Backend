@@ -2,6 +2,7 @@ import { RoleCode } from '../../src/modules/roles/rbac.constants';
 import {
   API,
   bearer,
+  createCourseFixture,
   createTestContext,
   resetDatabase,
   seedAndLogin,
@@ -34,11 +35,7 @@ describe('Course publication (integration)', () => {
   });
 
   async function createCourse(cropId = tomatoId) {
-    const res = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send({
+    const res = await createCourseFixture(ctx, admin.id, {
         title: 'Tomato nursery management',
         shortDescription: 'Raise healthy tomato seedlings.',
         detailedDescription: 'Covers nursery site selection, sowing depth and hardening off.',
@@ -135,6 +132,20 @@ describe('Course publication (integration)', () => {
       .send({ scope: 'TARGETED', targetingGroupIds: [musanze, musanze] });
     expect(duplicate.status).toBe(400);
 
+    // The group page lists the course while the targeted publication is current.
+    const groupCourses = await ctx
+      .http()
+      .get(`${API}/admin/groups/${musanze}/courses`)
+      .set(...bearer(admin.accessToken))
+      .expect(200);
+    expect(groupCourses.body).toEqual([
+      expect.objectContaining({
+        courseId,
+        status: 'PUBLISHED',
+        publishedBy: { id: admin.id, fullName: expect.any(String) },
+      }),
+    ]);
+
     const unpublished = await ctx
       .http()
       .post(`${API}/courses/${courseId}/unpublish`)
@@ -142,6 +153,12 @@ describe('Course publication (integration)', () => {
       .send({});
     expect(unpublished.status).toBe(200);
     expect(unpublished.body).toMatchObject({ isCurrent: false, unpublishedBy: { id: admin.id } });
+    const afterUnpublish = await ctx
+      .http()
+      .get(`${API}/admin/groups/${musanze}/courses`)
+      .set(...bearer(admin.accessToken))
+      .expect(200);
+    expect(afterUnpublish.body).toEqual([]);
 
     const history = await ctx
       .http()

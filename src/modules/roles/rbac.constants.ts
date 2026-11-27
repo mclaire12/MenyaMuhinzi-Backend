@@ -92,6 +92,10 @@ export const Permission = {
   IvrConfigurationRead: 'ivr:configuration:read',
   IvrConfigurationManage: 'ivr:configuration:manage',
   IvrAnalyticsRead: 'ivr:analytics:read',
+  PlatformSettingsRead: 'platform-settings:read',
+  PlatformSettingsManage: 'platform-settings:manage',
+  CourseGenerationsCreate: 'course-generations:create',
+  CourseGenerationsRead: 'course-generations:read',
 } as const;
 
 export type Permission = (typeof Permission)[keyof typeof Permission];
@@ -174,6 +178,11 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'ivr:configuration:read': 'View IVR channel configuration',
   'ivr:configuration:manage': 'Change IVR channel configuration',
   'ivr:analytics:read': 'View IVR usage analytics',
+  'platform-settings:read': 'View platform information and defaults',
+  'platform-settings:manage': 'Change platform information and defaults',
+  'course-generations:create':
+    'Request AI course generation (administrators: platform courses; facilitators: courses for their own groups)',
+  'course-generations:read': 'View AI course generation requests and their status',
 };
 
 export interface RoleDefinition {
@@ -203,6 +212,8 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       Permission.CropsRead,
       Permission.CoursesRead,
       Permission.GroupCoursesAssign,
+      Permission.CourseGenerationsCreate,
+      Permission.CourseGenerationsRead,
       Permission.EnrollmentsRead,
       Permission.ProgressRead,
       Permission.AssessmentsRead,

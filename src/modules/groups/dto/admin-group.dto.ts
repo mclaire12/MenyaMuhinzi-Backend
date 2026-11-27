@@ -177,6 +177,26 @@ export class AdminGroupResponseDto {
   updatedAt: Date;
 }
 
+export class AdminGroupCourseDto {
+  @ApiProperty({ format: 'uuid' })
+  courseId: string;
+
+  @ApiProperty({ example: 'Tomato nursery management' })
+  title: string;
+
+  @ApiProperty({ example: 'PUBLISHED', description: 'Current course status' })
+  status: string;
+
+  @ApiProperty({ format: 'uuid' })
+  publicationId: string;
+
+  @ApiProperty()
+  publishedAt: Date;
+
+  @ApiProperty({ type: UserRefDto })
+  publishedBy: UserRefDto;
+}
+
 export class AdminGroupListResponseDto {
   @ApiProperty({ type: AdminGroupResponseDto, isArray: true })
   data: AdminGroupResponseDto[];

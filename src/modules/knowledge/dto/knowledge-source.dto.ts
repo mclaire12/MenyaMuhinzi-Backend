@@ -3,6 +3,7 @@ import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsNotEmpty,
@@ -45,7 +46,20 @@ export const toStringList = ({ value }: { value: unknown }): unknown => {
 
 const emptyToUndefined = ({ value }: { value: unknown }) => (value === '' ? undefined : value);
 
+/** Multipart forms send booleans as "true" / "false". */
+const toBoolean = ({ value }: { value: unknown }): unknown =>
+  value === 'true' ? true : value === 'false' ? false : value === '' ? undefined : value;
+
 class SourceMetadataFields {
+  @ApiPropertyOptional({
+    default: true,
+    description: 'Include the approved version in the corpus used to retrain the AI models',
+  })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  includeInTraining?: boolean;
+
   @ApiPropertyOptional({ maxLength: 5000 })
   @IsOptional()
   @Trim()
@@ -346,6 +360,8 @@ export class KnowledgeSourceResponseDto {
   })
   status: KnowledgeSourceStatus;
   @ApiProperty() isActive: boolean;
+  @ApiProperty({ description: 'Part of the model retraining corpus once approved' })
+  includeInTraining: boolean;
   @ApiProperty() latestVersionNumber: number;
   @ApiPropertyOptional({
     type: String,
@@ -371,6 +387,23 @@ export class KnowledgeSourceResponseDto {
   versions?: KnowledgeVersionDto[];
   @ApiProperty() createdAt: Date;
   @ApiProperty() updatedAt: Date;
+}
+
+export class TrainingCorpusEntryDto {
+  @ApiProperty({ format: 'uuid' }) sourceId: string;
+  @ApiProperty() title: string;
+  @ApiProperty({ enum: KnowledgeSourceType }) sourceType: KnowledgeSourceType;
+  @ApiProperty({ enum: Language }) language: Language;
+  @ApiProperty({ type: String, isArray: true, example: ['TOMATO'] }) cropCodes: string[];
+  @ApiProperty({ type: String, isArray: true, example: ['IRRIGATION'] }) topicCodes: string[];
+  @ApiPropertyOptional({ type: Date, nullable: true }) approvedAt: Date | null;
+  @ApiProperty({ type: KnowledgeVersionDto, description: 'The approved version to train on' })
+  version: KnowledgeVersionDto;
+}
+
+export class TrainingCorpusResponseDto {
+  @ApiProperty({ type: TrainingCorpusEntryDto, isArray: true }) data: TrainingCorpusEntryDto[];
+  @ApiProperty({ type: PaginationMetaDto }) meta: PaginationMetaDto;
 }
 
 export class KnowledgeSourceListResponseDto {

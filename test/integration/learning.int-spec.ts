@@ -3,6 +3,7 @@ import { RoleCode } from '../../src/modules/roles/rbac.constants';
 import {
   API,
   bearer,
+  createCourseFixture,
   createTestContext,
   resetDatabase,
   seedAndLogin,
@@ -45,11 +46,7 @@ describe('Learning catalogue, enrollment, progress and assessments (integration)
   });
 
   async function createCourse(targetAudience: string, title = 'Tomato nursery management') {
-    const res = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send({
+    const res = await createCourseFixture(ctx, admin.id, {
         title,
         shortDescription: 'Raise healthy tomato seedlings.',
         detailedDescription: 'Covers nursery site selection, sowing depth and hardening off.',

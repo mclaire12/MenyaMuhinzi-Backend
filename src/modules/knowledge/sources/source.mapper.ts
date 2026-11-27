@@ -76,6 +76,7 @@ export function toSourceResponse(
       : null,
     status: source.status,
     isActive: source.isActive,
+    includeInTraining: source.includeInTraining,
     latestVersionNumber: source.latestVersionNumber,
     approvedVersionId: source.approvedVersionId,
     approvedById: source.approvedById,

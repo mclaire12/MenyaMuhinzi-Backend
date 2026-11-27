@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { CourseStatus } from '../../generated/prisma/client';
+import { CourseGenerationStatus, CourseStatus } from '../../generated/prisma/client';
 
 /** Status changes made through PATCH. Publishing has its own endpoint. */
 export function assertCourseStatusChange(from: CourseStatus, to: CourseStatus): void {
@@ -29,5 +29,16 @@ export function assertCanDeleteCourse(status: CourseStatus): void {
   }
   if (status === CourseStatus.ARCHIVED) {
     throw new ConflictException('Archived courses are kept for their publication history');
+  }
+}
+
+/** The AI is still writing the course: it cannot be published or shared yet. */
+export function assertGenerationFinished(generation: { status: CourseGenerationStatus } | null): void {
+  if (
+    generation &&
+    (generation.status === CourseGenerationStatus.PENDING ||
+      generation.status === CourseGenerationStatus.PROCESSING)
+  ) {
+    throw new ConflictException('The AI has not finished writing this course yet');
   }
 }

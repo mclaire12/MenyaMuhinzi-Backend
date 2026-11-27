@@ -10,7 +10,7 @@ import { seedTelephony } from '../../prisma/seed-telephony';
 import { AppModule } from '../../src/app.module';
 import { normalizeRwandanPhone } from '../../src/common/utils/phone';
 import { setupApp } from '../../src/bootstrap/setup-app';
-import { UserStatus } from '../../src/generated/prisma/client';
+import { Prisma, UserStatus } from '../../src/generated/prisma/client';
 import { PrismaService } from '../../src/infrastructure/database/prisma.service';
 import { ALL_QUEUES, QueueName } from '../../src/infrastructure/queue/queue.constants';
 import { REDIS_CLIENT } from '../../src/infrastructure/redis/redis.constants';
@@ -127,6 +127,26 @@ export class MailOutbox {
 }
 
 export const API = '/api/v1';
+
+/**
+ * Test fixture: inserts a draft course directly. In the application courses are only
+ * created through AI course generation (POST /course-generations); tests that need a
+ * course as a starting point use this instead. The result mirrors an HTTP 201 response.
+ */
+export async function createCourseFixture(
+  ctx: { prisma: PrismaService },
+  createdById: string,
+  data: Omit<Prisma.CourseUncheckedCreateInput, 'createdById'> | Record<string, unknown>,
+): Promise<{ status: number; body: Record<string, unknown> & { id: string } }> {
+  const course = await ctx.prisma.course.create({
+    data: { ...(data as Omit<Prisma.CourseUncheckedCreateInput, 'createdById'>), createdById },
+    include: {
+      crop: { select: { id: true, code: true, nameEn: true, nameRw: true } },
+      createdBy: { select: { id: true, fullName: true } },
+    },
+  });
+  return { status: 201, body: course as unknown as Record<string, unknown> & { id: string } };
+}
 export const DEFAULT_PASSWORD = 'Umuhinzi2026';
 
 export interface FakeQueue {

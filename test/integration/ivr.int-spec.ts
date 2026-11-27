@@ -9,6 +9,7 @@ import {
 import {
   API,
   bearer,
+  createCourseFixture,
   createTestContext,
   resetDatabase,
   seedAndLogin,
@@ -44,11 +45,7 @@ describe('IVR infrastructure (integration)', () => {
       phoneNumber: '+250788200001',
     });
     const tomatoId = (await ctx.prisma.crop.findUniqueOrThrow({ where: { code: 'TOMATO' } })).id;
-    const course = await ctx
-      .http()
-      .post(`${API}/courses`)
-      .set(...bearer(admin.accessToken))
-      .send({
+    const course = await createCourseFixture(ctx, admin.id, {
         title: 'Tomato basics IVR',
         shortDescription: 'IVR course',
         detailedDescription: 'Tomato learning for basic phones.',

@@ -172,21 +172,21 @@ model User {
   statusChangedBy User?  @relation("UserStatusChangedBy", fields: [statusChangedById], references: [id], onDelete: SetNull)
   statusChanges   User[] @relation("UserStatusChangedBy")
 
-  roles               UserRole[]           @relation("UserRoles")
-  assignedRoles       UserRole[]           @relation("UserRoleAssignedBy")
-  refreshTokens       RefreshToken[]
-  webSessions         WebSession[]
-  loginAttempts       LoginAttempt[]
+  roles                   UserRole[]               @relation("UserRoles")
+  assignedRoles           UserRole[]               @relation("UserRoleAssignedBy")
+  refreshTokens           RefreshToken[]
+  webSessions             WebSession[]
+  loginAttempts           LoginAttempt[]
   passwordResetTokens     PasswordResetToken[]
   passwordResetDeliveries PasswordResetDelivery[]
   emailVerificationTokens EmailVerificationToken[]
   oauthIdentities         UserOAuthIdentity[]
-  accountRequests     AccountRequest[]     @relation("AccountRequestApplicant")
-  submittedRequests   AccountRequest[]     @relation("AccountRequestSubmittedBy")
-  approvalDecisions   AccountApproval[]
-  farmerProfile       FarmerProfile?
-  facilitatorProfile  FacilitatorProfile?
-  location            UserLocation?
+  accountRequests         AccountRequest[]         @relation("AccountRequestApplicant")
+  submittedRequests       AccountRequest[]         @relation("AccountRequestSubmittedBy")
+  approvalDecisions       AccountApproval[]
+  farmerProfile           FarmerProfile?
+  facilitatorProfile      FacilitatorProfile?
+  location                UserLocation?
 
   adminTargetingGroupsCreated         AdminTargetingGroup[]            @relation("AdminTargetingGroupCreatedBy")
   facilitatorGroupsLed                FacilitatorGroup[]               @relation("FacilitatorGroupFacilitator")
@@ -233,9 +233,12 @@ model User {
   notificationTemplateVersionsCreated NotificationTemplateVersion[]    @relation("NotificationTemplateVersionCreatedBy")
   notificationCategorySettingsUpdated NotificationCategorySetting[]    @relation("NotificationCategorySettingUpdatedBy")
   notificationChannelSettingsUpdated  NotificationChannelSetting[]     @relation("NotificationChannelSettingUpdatedBy")
-  ussdSessions                      UssdSession[]
-  ivrSessions                       IvrSession[]
-  telephonyChannelSettingsUpdated   TelephonyChannelSetting[]        @relation("TelephonyChannelSettingUpdatedBy")
+  ussdSessions                        UssdSession[]
+  ivrSessions                         IvrSession[]
+  telephonyChannelSettingsUpdated     TelephonyChannelSetting[]        @relation("TelephonyChannelSettingUpdatedBy")
+  platformSettingsUpdated             PlatformSetting[]                @relation("PlatformSettingUpdatedBy")
+  courseGenerationRequests            CourseGenerationRequest[]        @relation("CourseGenerationRequestedBy")
+  facilitatorOwnedCourses             Course[]                         @relation("FacilitatorOwnedCourses")
 
   @@index([status])
   @@index([createdAt])
@@ -390,7 +393,7 @@ model PasswordResetToken {
   requestedIp String?   @db.VarChar(64)
   createdAt   DateTime  @default(now())
 
-  user     User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   delivery PasswordResetDelivery?
 
   @@index([userId])
@@ -398,17 +401,17 @@ model PasswordResetToken {
 }
 
 model EmailVerificationToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @db.Uuid
-  tokenHash String    @unique @db.VarChar(128)
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  tokenHash      String    @unique @db.VarChar(128)
   /// SHA-256 of the 6-digit code bound to this token; never stored in plain text.
-  otpHash   String?   @db.VarChar(128)
+  otpHash        String?   @db.VarChar(128)
   /// Wrong codes entered for this token; the token is retired after the limit.
-  failedAttempts Int  @default(0)
-  email     String    @db.VarChar(254)
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
+  failedAttempts Int       @default(0)
+  email          String    @db.VarChar(254)
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -672,22 +675,94 @@ model Course {
   status                   CourseStatus    @default(DRAFT)
   publishedAt              DateTime?
   createdById              String          @db.Uuid
+  /// Set for courses a facilitator generated. They are published to one or more of that
+  /// facilitator's own groups (FacilitatorGroupCourse) and never platform-wide.
+  facilitatorOwnerId       String?         @db.Uuid
   createdAt                DateTime        @default(now())
   updatedAt                DateTime        @updatedAt
 
-  crop         Crop                     @relation(fields: [cropId], references: [id], onDelete: Restrict)
-  createdBy    User                     @relation("CourseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  modules      CourseModule[]
-  publications CoursePublication[]
-  groupCourses FacilitatorGroupCourse[]
-  enrollments  CourseEnrollment[]
-  assessments  Assessment[]
+  crop             Crop                     @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  createdBy        User                     @relation("CourseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  facilitatorOwner User?                    @relation("FacilitatorOwnedCourses", fields: [facilitatorOwnerId], references: [id], onDelete: Restrict)
+  generation       CourseGenerationRequest?
+  modules          CourseModule[]
+  publications     CoursePublication[]
+  groupCourses     FacilitatorGroupCourse[]
+  enrollments      CourseEnrollment[]
+  assessments      Assessment[]
 
   @@index([status, createdAt])
   @@index([cropId])
   @@index([language])
   @@index([createdById])
+  @@index([facilitatorOwnerId])
   @@map("courses")
+}
+
+enum CourseGenerationStatus {
+  /// Saved and waiting for the course-generation model.
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum CourseGenerationScope {
+  /// Administrator course, published platform-wide or to targeting groups once reviewed.
+  PLATFORM
+  /// Facilitator course, published to one or more of their own groups only.
+  GROUP
+}
+
+/// The ways a farmer can study a sub-chapter (lesson).
+enum LearningFormat {
+  TEXT
+  AUDIO
+  VIDEO
+}
+
+/// One AI generation run for a course. The course skeleton (chapters = modules,
+/// sub-chapters = lessons) is created when the request is saved; the model fills it.
+model CourseGenerationRequest {
+  id             String                 @id @default(uuid()) @db.Uuid
+  courseId       String                 @unique @db.Uuid
+  scope          CourseGenerationScope
+  /// Instructions for the model (goals, tone, local practices to cover).
+  brief          String                 @db.Text
+  /// The structure the requester designed: chapters with their sub-chapters.
+  structure      Json
+  contentFormats LearningFormat[]
+  status         CourseGenerationStatus @default(PENDING)
+  statusMessage  String?                @db.VarChar(1000)
+  /// AI model that produced (or is producing) the content, once integrated.
+  modelId        String?                @db.Uuid
+  requestedById  String                 @db.Uuid
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  course      Course                   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  requestedBy User                     @relation("CourseGenerationRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  sources     CourseGenerationSource[]
+
+  @@index([status, createdAt])
+  @@index([requestedById])
+  @@map("course_generation_requests")
+}
+
+/// Knowledge Base sources the model must draw on for a generation request.
+model CourseGenerationSource {
+  requestId String @db.Uuid
+  sourceId  String @db.Uuid
+
+  request CourseGenerationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  source  KnowledgeSource         @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+
+  @@id([requestId, sourceId])
+  @@index([sourceId])
+  @@map("course_generation_sources")
 }
 
 model CourseModule {
@@ -939,10 +1014,10 @@ model LearningSession {
   endedAt         DateTime?
   durationSeconds Int?
 
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson        Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  ussdSessions  UssdSession[]
-  ivrSessions   IvrSession[]
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson       Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  ussdSessions UssdSession[]
+  ivrSessions  IvrSession[]
 
   @@index([userId, lessonId, status])
   @@index([userId, courseId])
@@ -1163,6 +1238,8 @@ model KnowledgeSource {
   /// Status of the latest version, or ARCHIVED once the source is archived.
   status              KnowledgeSourceStatus @default(DRAFT)
   isActive            Boolean               @default(true)
+  /// Approved versions of sources with this flag form the corpus for retraining the models.
+  includeInTraining   Boolean               @default(true)
   latestVersionNumber Int                   @default(0)
   /// The version that retrieval may use. Older approved versions are kept as ARCHIVED.
   approvedVersionId   String?               @unique @db.Uuid
@@ -1180,6 +1257,7 @@ model KnowledgeSource {
   crops           KnowledgeSourceCrop[]
   topics          KnowledgeSourceTopic[]
   approvals       KnowledgeApproval[]
+  generationUses  CourseGenerationSource[]
   jobs            KnowledgeProcessingJob[]
   history         KnowledgeProcessingHistory[]
   documents       KnowledgeDocument[]
@@ -2254,25 +2332,25 @@ enum TelephonyEndReason {
 
 /// Provider-agnostic USSD session persisted for audit and admin oversight.
 model UssdSession {
-  id                 String                 @id @default(uuid()) @db.Uuid
-  providerId         String                 @db.VarChar(64)
-  providerSessionId  String                 @db.VarChar(128)
-  phoneNumber        String                 @db.VarChar(20)
-  userId             String?                @db.Uuid
-  language           Language?
-  status             TelephonySessionStatus @default(ACTIVE)
-  menuCode           String                 @default("MAIN") @db.VarChar(64)
-  state              Json                   @default("{}")
-  learningSessionId  String?                @db.Uuid
-  startedAt          DateTime               @default(now())
-  lastActivityAt     DateTime               @default(now())
-  endedAt            DateTime?
-  endReason          TelephonyEndReason?
-  requestCount       Int                    @default(0)
-  lastInputHash      String?                @db.VarChar(64)
-  isTestData         Boolean                @default(false)
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
+  id                String                 @id @default(uuid()) @db.Uuid
+  providerId        String                 @db.VarChar(64)
+  providerSessionId String                 @db.VarChar(128)
+  phoneNumber       String                 @db.VarChar(20)
+  userId            String?                @db.Uuid
+  language          Language?
+  status            TelephonySessionStatus @default(ACTIVE)
+  menuCode          String                 @default("MAIN") @db.VarChar(64)
+  state             Json                   @default("{}")
+  learningSessionId String?                @db.Uuid
+  startedAt         DateTime               @default(now())
+  lastActivityAt    DateTime               @default(now())
+  endedAt           DateTime?
+  endReason         TelephonyEndReason?
+  requestCount      Int                    @default(0)
+  lastInputHash     String?                @db.VarChar(64)
+  isTestData        Boolean                @default(false)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
 
   user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
   learningSession LearningSession? @relation(fields: [learningSessionId], references: [id], onDelete: SetNull)
@@ -2286,26 +2364,26 @@ model UssdSession {
 
 /// Provider-agnostic IVR call session.
 model IvrSession {
-  id                 String                 @id @default(uuid()) @db.Uuid
-  providerId         String                 @db.VarChar(64)
-  providerSessionId  String                 @db.VarChar(128)
-  callSid            String?                @db.VarChar(128)
-  phoneNumber        String                 @db.VarChar(20)
-  userId             String?                @db.Uuid
-  language           Language?
-  status             TelephonySessionStatus @default(ACTIVE)
-  menuCode           String                 @default("MAIN") @db.VarChar(64)
-  state              Json                   @default("{}")
-  learningSessionId  String?                @db.Uuid
-  startedAt          DateTime               @default(now())
-  lastActivityAt     DateTime               @default(now())
-  endedAt            DateTime?
-  endReason          TelephonyEndReason?
-  requestCount       Int                    @default(0)
-  lastInputHash      String?                @db.VarChar(64)
-  isTestData         Boolean                @default(false)
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
+  id                String                 @id @default(uuid()) @db.Uuid
+  providerId        String                 @db.VarChar(64)
+  providerSessionId String                 @db.VarChar(128)
+  callSid           String?                @db.VarChar(128)
+  phoneNumber       String                 @db.VarChar(20)
+  userId            String?                @db.Uuid
+  language          Language?
+  status            TelephonySessionStatus @default(ACTIVE)
+  menuCode          String                 @default("MAIN") @db.VarChar(64)
+  state             Json                   @default("{}")
+  learningSessionId String?                @db.Uuid
+  startedAt         DateTime               @default(now())
+  lastActivityAt    DateTime               @default(now())
+  endedAt           DateTime?
+  endReason         TelephonyEndReason?
+  requestCount      Int                    @default(0)
+  lastInputHash     String?                @db.VarChar(64)
+  isTestData        Boolean                @default(false)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
 
   user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
   learningSession LearningSession? @relation(fields: [learningSessionId], references: [id], onDelete: SetNull)
@@ -2318,16 +2396,29 @@ model IvrSession {
 }
 
 /// USSD and IVR channel switches and limits. No telecom provider is integrated by default.
+/// Administrator-managed platform settings, one JSON document per key (e.g. "platform").
+model PlatformSetting {
+  key         String   @id @db.VarChar(64)
+  value       Json
+  updatedById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  updatedBy User? @relation("PlatformSettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("platform_settings")
+}
+
 model TelephonyChannelSetting {
-  channel            String   @id @db.VarChar(8)
-  isEnabled          Boolean  @default(false)
-  serviceCode        String?  @db.VarChar(32)
-  accessNumber       String?  @db.VarChar(32)
-  sessionTtlSeconds  Int
-  maxScreenChars     Int      @default(160)
-  menuVersion        String   @default("1") @db.VarChar(16)
-  updatedById        String?  @db.Uuid
-  updatedAt          DateTime @updatedAt
+  channel           String   @id @db.VarChar(8)
+  isEnabled         Boolean  @default(false)
+  serviceCode       String?  @db.VarChar(32)
+  accessNumber      String?  @db.VarChar(32)
+  sessionTtlSeconds Int
+  maxScreenChars    Int      @default(160)
+  menuVersion       String   @default("1") @db.VarChar(16)
+  updatedById       String?  @db.Uuid
+  updatedAt         DateTime @updatedAt
 
   updatedBy User? @relation("TelephonyChannelSettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 

@@ -30,7 +30,7 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { ErrorResponseDto } from '../../../common/dto/error-response.dto';
-import type { Paginated } from '../../../common/dto/pagination.dto';
+import { PaginationQueryDto, type Paginated } from '../../../common/dto/pagination.dto';
 import type { AuthenticatedUser } from '../../auth/auth.types';
 import { Authorize, CurrentUser } from '../../auth/decorators/auth.decorators';
 import { Permission, RoleCode } from '../../roles/rbac.constants';
@@ -49,6 +49,8 @@ import {
   ProcessSourceDto,
   RejectSourceDto,
   SourceHistoryResponseDto,
+  TrainingCorpusEntryDto,
+  TrainingCorpusResponseDto,
   UpdateKnowledgeSourceDto,
 } from '../dto/knowledge-source.dto';
 import { KnowledgeReviewService } from './knowledge-review.service';
@@ -106,6 +108,18 @@ export class KnowledgeSourcesController {
     @CurrentUser() actor: AuthenticatedUser,
   ): Promise<Paginated<KnowledgeSourceResponseDto>> {
     return this.sources.list(query, actor);
+  }
+
+  @Get('knowledge/training-corpus')
+  @Authorize(manage)
+  @ApiOperation({
+    summary: 'Model retraining corpus',
+    description:
+      'Approved, active sources marked "include in training", each with its approved version. The model-training pipeline reads this list. **Admin only.**',
+  })
+  @ApiOkResponse({ type: TrainingCorpusResponseDto })
+  trainingCorpus(@Query() query: PaginationQueryDto): Promise<Paginated<TrainingCorpusEntryDto>> {
+    return this.sources.trainingCorpus(query);
   }
 
   @Get('knowledge/sources/:id')

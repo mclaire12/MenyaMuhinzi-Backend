@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { CourseStatus, Prisma, PublicationScope, RecordStatus } from '../../generated/prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import { assertCanPublish } from './course-status.policy';
+import { assertCanPublish, assertGenerationFinished } from './course-status.policy';
 import type { CoursePublicationResponseDto, PublishCourseDto } from './dto/publication.dto';
 
 const publicationSelect = {
@@ -46,9 +46,16 @@ export class CoursePublicationService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const course = await tx.course.findUnique({ where: { id: courseId }, select: { status: true } });
+      const course = await tx.course.findUnique({
+        where: { id: courseId },
+        select: { status: true, facilitatorOwnerId: true, generation: { select: { status: true } } },
+      });
       if (!course) throw new NotFoundException('Course not found');
+      if (course.facilitatorOwnerId) {
+        throw new BadRequestException('Facilitator courses are only published to the facilitator\'s groups');
+      }
       assertCanPublish(course.status);
+      assertGenerationFinished(course.generation);
 
       const groupIds = dto.scope === PublicationScope.TARGETED ? (dto.targetingGroupIds ?? []) : [];
       if (groupIds.length > 0) {

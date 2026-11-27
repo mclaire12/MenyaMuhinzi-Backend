@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,10 +11,16 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBadRequestResponse,
+  ApiBody,
   ApiConflictResponse,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
@@ -41,6 +48,12 @@ import {
   UpdateFacilitatorGroupDto,
 } from './dto/facilitator-group.dto';
 import { FacilitatorGroupsService } from './facilitator-groups.service';
+import { FarmerRegistrationFieldsDto } from '../farmers/dto/farmer.dto';
+import {
+  GroupMemberRegistrationService,
+  type ImportResult,
+  type RegisteredMember,
+} from './group-member-registration.service';
 import { GroupCoursesService } from './group-courses.service';
 
 const groupRoles = [RoleCode.Admin, RoleCode.Facilitator];
@@ -56,7 +69,23 @@ export class FacilitatorGroupsController {
   constructor(
     private readonly groups: FacilitatorGroupsService,
     private readonly courses: GroupCoursesService,
+    private readonly registration: GroupMemberRegistrationService,
   ) {}
+
+  // Declared before ':id' routes so the path is not read as a group id.
+  @Get('member-template')
+  @Authorize({ roles: groupRoles, permissions: [Permission.FarmerGroupsManage] })
+  @ApiOperation({
+    summary: 'Excel template for registering farmers in a group',
+    description: 'Same information as registering a new farmer. **Admin or facilitator.**',
+  })
+  @ApiOkResponse({ description: 'An .xlsx workbook' })
+  async memberTemplate(): Promise<StreamableFile> {
+    return new StreamableFile(await this.registration.template(), {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      disposition: 'attachment; filename="menyamuhinzi-group-members.xlsx"',
+    });
+  }
 
   @Post()
   @Authorize({ roles: groupRoles, permissions: [Permission.FarmerGroupsManage] })
@@ -152,6 +181,43 @@ export class FacilitatorGroupsController {
     @CurrentUser() actor: AuthenticatedUser,
   ): Promise<GroupMemberResponseDto[]> {
     return this.groups.addMembers(id, dto, actor);
+  }
+
+  @Post(':id/members/register')
+  @Authorize({ roles: groupRoles, permissions: [Permission.FarmerGroupsManage] })
+  @ApiOperation({
+    summary: 'Register a new farmer directly into a group',
+    description:
+      'Creates an active farmer account (listed under Users for administrators), adds it to the group and emails the verification link and code. **Admin, or the assigned facilitator.**',
+  })
+  @ApiCreatedResponse({ description: 'The new member and whether the verification email was sent' })
+  @ApiConflictResponse({ type: ErrorResponseDto, description: 'Phone number or email already registered, or the group is inactive' })
+  registerMember(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: FarmerRegistrationFieldsDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ): Promise<RegisteredMember> {
+    return this.registration.register(id, dto, actor);
+  }
+
+  @Post(':id/members/import')
+  @Authorize({ roles: groupRoles, permissions: [Permission.FarmerGroupsManage] })
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024, files: 1 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @ApiOperation({
+    summary: 'Register farmers into a group from the Excel template',
+    description:
+      'Each valid row becomes an active farmer in the group and receives a verification email. Rows with errors are reported and skipped. **Admin, or the assigned facilitator.**',
+  })
+  @ApiCreatedResponse({ description: 'Created members and the rows that failed, with reasons' })
+  importMembers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: { buffer?: Buffer } | undefined,
+    @CurrentUser() actor: AuthenticatedUser,
+  ): Promise<ImportResult> {
+    if (!file?.buffer?.length) throw new BadRequestException('Upload the filled Excel template');
+    return this.registration.importWorkbook(id, file.buffer, actor);
   }
 
   @Get(':id/members')
